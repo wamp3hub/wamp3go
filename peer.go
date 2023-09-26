@@ -3,6 +3,8 @@ package wamp3go
 import (
 	"errors"
 	"log"
+
+	"wamp3go/shared"
 )
 
 type Event any
@@ -10,6 +12,7 @@ type Event any
 type QEvent chan Event
 
 type Serializer interface {
+	Code() string
 	Encode(Event) ([]byte, error)
 	Decode([]byte) (Event, error)
 }
@@ -21,26 +24,28 @@ type Transport interface {
 }
 
 type Peer struct {
-	id            string
-	Transport     Transport
-	PublishEvents *Stream[PublishEvent]
-	CallEvents    *Stream[CallEvent]
-	AcceptEvents  PendingMap[AcceptEvent]
-	ReplyEvents   PendingMap[ReplyEvent]
-}
-
-func (peer *Peer) ID() string {
-	return peer.id
+	ID                    string
+	Transport             Transport
+	PendingAcceptEvents   shared.PendingMap[AcceptEvent]
+	PendingReplyEvents    shared.PendingMap[ReplyEvent]
+	publishEventProducer  *shared.Producer[PublishEvent]
+	IncomingPublishEvents *shared.Consumer[PublishEvent]
+	callEventProducer     *shared.Producer[CallEvent]
+	IncomingCallEvents    *shared.Consumer[CallEvent]
 }
 
 func NewPeer(ID string, transport Transport) *Peer {
+	publishEventProducer, publishEventConsumer := shared.NewStream[PublishEvent]()
+	callEventProducer, callEventConsumer := shared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
 		transport,
-		NewStream[PublishEvent](),
-		NewStream[CallEvent](),
-		make(PendingMap[AcceptEvent]),
-		make(PendingMap[ReplyEvent]),
+		shared.NewPendingMap[AcceptEvent](),
+		shared.NewPendingMap[ReplyEvent](),
+		publishEventProducer,
+		publishEventConsumer,
+		callEventProducer,
+		callEventConsumer,
 	}
 }
 
@@ -52,14 +57,14 @@ func (peer *Peer) Consume() {
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
-			e = peer.AcceptEvents.Throw(features.SourceID, event)
+			e = peer.PendingAcceptEvents.Throw(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e = peer.ReplyEvents.Throw(features.InvocationID, event)
+			e = peer.PendingReplyEvents.Throw(features.InvocationID, event)
 		case PublishEvent:
-			peer.PublishEvents.Produce(event)
+			peer.publishEventProducer.Produce(event)
 		case CallEvent:
-			peer.CallEvents.Produce(event)
+			peer.callEventProducer.Produce(event)
 		default:
 			e = errors.New("InvalidEvent")
 		}
@@ -67,6 +72,6 @@ func (peer *Peer) Consume() {
 			log.Printf("peer %s", e)
 		}
 	}
-	peer.PublishEvents.Reset()
-	peer.CallEvents.Reset()
+	peer.publishEventProducer.Close()
+	peer.callEventProducer.Close()
 }

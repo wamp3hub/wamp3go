@@ -21,7 +21,9 @@ func (field *jsonPayloadField) Payload(v any) error {
 
 type JSONSerializer struct{}
 
-var DefaultJSONSerializer = JSONSerializer{}
+func (JSONSerializer) Code() string {
+	return "json"
+}
 
 func (JSONSerializer) Encode(event client.Event) ([]byte, error) {
 	switch event := event.(type) {
@@ -123,3 +125,5 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 	}
 	return nil, e
 }
+
+var DefaultJSONSerializer JSONSerializer

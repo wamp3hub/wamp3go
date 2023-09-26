@@ -3,7 +3,10 @@ package wamp3go
 import (
 	"errors"
 	"log"
+	"time"
 )
+
+const DEFAULT_TIMEOUT = 60 * time.Second
 
 func ExtractError(event ReplyEvent) error {
 	payload := new(ErrorPayload)
@@ -15,9 +18,13 @@ func ExtractError(event ReplyEvent) error {
 }
 
 type Session struct {
-	*Peer
+	peer          *Peer
 	Subscriptions map[string]publishEndpoint
 	Registrations map[string]callEndpoint
+}
+
+func (session *Session) ID() string {
+	return session.peer.ID
 }
 
 func NewSession(peer *Peer) *Session {
@@ -27,17 +34,17 @@ func NewSession(peer *Peer) *Session {
 }
 
 func (session *Session) Publish(event PublishEvent) error {
-	e := session.Transport.Send(event)
+	e := session.peer.Transport.Send(event)
 	if e == nil {
-		_, e = session.AcceptEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+		_, e = session.peer.PendingAcceptEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
 	}
 	return e
 }
 
 func (session *Session) Call(event CallEvent) (response ReplyEvent) {
-	e := session.Transport.Send(event)
+	e := session.peer.Transport.Send(event)
 	if e == nil {
-		response, e = session.ReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+		response, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
 	}
 	if e != nil {
 		response = NewErrorEvent(event.ID(), e)
@@ -125,11 +132,13 @@ func (session *Session) Unregister(registrationID string) error {
 }
 
 // RENAME
-func Initialize(session *Session) error {
-	session.PublishEvents.Consume(
+func Initialize(session *Session) {
+	go session.peer.Consume()
+
+	session.peer.IncomingPublishEvents.Consume(
 		func(request PublishEvent) {
 			acceptEvent := NewAcceptEvent(request.ID())
-			e := session.Transport.Send(acceptEvent)
+			e := session.peer.Transport.Send(acceptEvent)
 			if e != nil {
 				log.Printf("accept not sent (session.ID=%s) %s", session.ID(), e)
 			}
@@ -144,17 +153,16 @@ func Initialize(session *Session) error {
 				)
 			}
 		},
-		func () {},
-		1,
+		func() {},
 	)
 
-	session.CallEvents.Consume(
+	session.peer.IncomingCallEvents.Consume(
 		func(request CallEvent) {
 			route := request.Route()
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
 				response := endpoint(request)
-				e := session.Transport.Send(response)
+				e := session.peer.Transport.Send(response)
 				if e != nil {
 					log.Printf("reply not sent (session.ID=%s) %s", session.ID(), e)
 				}
@@ -165,12 +173,6 @@ func Initialize(session *Session) error {
 				)
 			}
 		},
-		func () {},
-		1,
+		func() {},
 	)
-
-	go session.Consume()
-
-	log.Printf("session joined (peer.ID=%s)", session.ID())
-	return nil
 }

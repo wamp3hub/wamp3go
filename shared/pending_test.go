@@ -1,4 +1,4 @@
-package wamp3go
+package shared
 
 import (
 	"sync"
@@ -32,7 +32,7 @@ func TestHappyPathPendingMap(t *testing.T) {
 
 	for _, key := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"} {
 		wg.Add(1)
-		go assertPending(t, &wg, &instance, key, DEFAULT_TIMEOUT, true)
+		go assertPending(t, &wg, &instance, key, 60 * time.Second, true)
 		wg.Wait()
 		wg.Add(1)
 		instance.Throw(key, true)

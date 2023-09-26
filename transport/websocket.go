@@ -55,10 +55,10 @@ func connectWebsocket(url string, serializer client.Serializer) (client.Transpor
 
 func WebsocketJoin(
 	address string,
-	payload *client.JoinPayload,
 	serializer client.Serializer,
 ) (*client.Session, error) {
-	response, e := client.Join(address, payload)
+	joinPayload := client.JoinPayload{"", serializer.Code()}
+	response, e := client.Join(address, &joinPayload)
 	if e == nil {
 		wsAddress := "ws://" + address + "/wamp3/websocket?token=" + response.Token
 		transport, e := connectWebsocket(wsAddress, serializer)

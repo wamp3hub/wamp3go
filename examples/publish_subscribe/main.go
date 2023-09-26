@@ -11,7 +11,6 @@ import (
 func main() {
 	session, e := wamp_transport.WebsocketJoin(
 		"0.0.0.0:9999",
-		&wamp.JoinPayload{"asia/almaty", "json"},
 		&wamp_serializer.DefaultJSONSerializer,
 	)
 	if e != nil {
