@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	client "wamp3go"
+	client "github.com/wamp3hub/wamp3go"
 )
 
 type jsonPayloadField struct {

@@ -3,8 +3,8 @@ package transport
 import (
 	"log"
 
-	client "wamp3go"
-	clientJoin "wamp3go/transport/join"
+	client "github.com/wamp3hub/wamp3go"
+	clientJoin "github.com/wamp3hub/wamp3go/transport/join"
 
 	"github.com/gorilla/websocket"
 )

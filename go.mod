@@ -1,4 +1,4 @@
-module wamp3go
+module github.com/wamp3hub/wamp3go
 
 go 1.20
 

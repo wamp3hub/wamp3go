@@ -1,8 +1,6 @@
 package transport
 
-import (
-	client "wamp3go"
-)
+import client "github.com/wamp3hub/wamp3go"
 
 type localTransport struct {
 	tq client.QEvent
