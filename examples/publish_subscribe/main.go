@@ -3,15 +3,16 @@ package main
 import (
 	"fmt"
 	"sync"
-	wamp "wamp3go"
-	wamp_serializer "wamp3go/serializer"
-	wamp_transport "wamp3go/transport"
+
+	wamp "github.com/wamp3hub/wamp3go"
+	wampSerializer "github.com/wamp3hub/wamp3go/serializer"
+	wampTransport "github.com/wamp3hub/wamp3go/transport"
 )
 
 func main() {
-	session, e := wamp_transport.WebsocketJoin(
+	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:9999",
-		&wamp_serializer.DefaultJSONSerializer,
+		&wampSerializer.DefaultJSONSerializer,
 	)
 	if e != nil {
 		panic("WebSocket Join")

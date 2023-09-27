@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log"
 
-	"wamp3go/shared"
+	"github.com/wamp3hub/wamp3go/shared"
 )
 
 type Event any

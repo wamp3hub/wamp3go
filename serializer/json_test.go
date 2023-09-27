@@ -3,7 +3,7 @@ package serializer
 import (
 	"testing"
 
-	client "wamp3go"
+	client "github.com/wamp3hub/wamp3go"
 
 	"github.com/google/uuid"
 )
@@ -112,7 +112,6 @@ func testReplyEventSerializer(t *testing.T, serializer client.Serializer) {
 		t.Fatal("InvalidPayload")
 	}
 }
-
 
 func TestHappyPathJSONSerializer(t *testing.T) {
 	serializer := new(JSONSerializer)
