@@ -8,11 +8,15 @@ type Listener[T any] struct {
 	complete completeFunction
 }
 
+// TODO unconsume
+
 type ListenerList[T any] []Listener[T]
 
 type Consumer[T any] struct {
 	listeners ListenerList[T]
 }
+
+// TODO rate limiting
 
 func (c *Consumer[T]) Consume(
 	next nextFunction[T],

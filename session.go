@@ -28,9 +28,50 @@ func (session *Session) ID() string {
 }
 
 func NewSession(peer *Peer) *Session {
-	return &Session{
-		peer, make(map[string]publishEndpoint), make(map[string]callEndpoint),
-	}
+	session := Session{peer, make(map[string]publishEndpoint), make(map[string]callEndpoint)}
+
+	session.peer.IncomingPublishEvents.Consume(
+		func(publishEvent PublishEvent) {
+			acceptEvent := NewAcceptEvent(publishEvent.ID())
+			e := session.peer.Transport.Send(acceptEvent)
+			if e != nil {
+				log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
+			}
+			route := publishEvent.Route()
+			endpoint, exist := session.Subscriptions[route.EndpointID]
+			if exist {
+				endpoint(publishEvent)
+			} else {
+				log.Printf(
+					"[session] subscription not found (ID=%s route.ID=%s publisher.ID=%s)",
+					session.ID(), route.EndpointID, route.PublisherID,
+				)
+			}
+		},
+		func() {},
+	)
+
+	session.peer.IncomingCallEvents.Consume(
+		func(callEvent CallEvent) {
+			route := callEvent.Route()
+			endpoint, exist := session.Registrations[route.EndpointID]
+			if exist {
+				replyEvent := endpoint(callEvent)
+				e := session.peer.Transport.Send(replyEvent)
+				if e != nil {
+					log.Printf("[session] reply not sent (ID=%s e=%s)", session.ID(), e)
+				}
+			} else {
+				log.Printf(
+					"[session] registration not found (ID=%s route.ID=%s caller.ID=%s)",
+					session.ID(), route.EndpointID, route.CallerID,
+				)
+			}
+		},
+		func() {},
+	)
+
+	return &session
 }
 
 func (session *Session) Publish(event PublishEvent) error {
@@ -41,15 +82,15 @@ func (session *Session) Publish(event PublishEvent) error {
 	return e
 }
 
-func (session *Session) Call(event CallEvent) (response ReplyEvent) {
+func (session *Session) Call(event CallEvent) (replyEvent ReplyEvent) {
 	e := session.peer.Transport.Send(event)
 	if e == nil {
-		response, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+		replyEvent, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
 	}
 	if e != nil {
-		response = NewErrorEvent(event.ID(), e)
+		replyEvent = NewErrorEvent(event.ID(), e)
 	}
-	return response
+	return replyEvent
 }
 
 type NewResourcePayload[O any] struct {
@@ -62,21 +103,21 @@ func (session *Session) Subscribe(
 	features *SubscribeOptions,
 	endpoint publishEndpoint,
 ) (*Subscription, error) {
-	request := NewCallEvent(
+	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.subscribe"},
 		&NewResourcePayload[SubscribeOptions]{uri, features},
 	)
-	response := session.Call(request)
-	replyFeatures := response.Features()
+	replyEvent := session.Call(callEvent)
+	replyFeatures := replyEvent.Features()
 	if replyFeatures.OK {
 		subscription := new(Subscription)
-		e := response.Payload(subscription)
+		e := replyEvent.Payload(subscription)
 		if e == nil {
 			session.Subscriptions[subscription.ID] = endpoint
 			return subscription, nil
 		}
 	}
-	return nil, ExtractError(response)
+	return nil, ExtractError(replyEvent)
 }
 
 func (session *Session) Register(
@@ -84,21 +125,21 @@ func (session *Session) Register(
 	features *RegisterOptions,
 	endpoint callEndpoint,
 ) (*Registration, error) {
-	request := NewCallEvent(
+	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.register"},
 		&NewResourcePayload[RegisterOptions]{uri, features},
 	)
-	response := session.Call(request)
-	replyFeatures := response.Features()
+	replyEvent := session.Call(callEvent)
+	replyFeatures := replyEvent.Features()
 	if replyFeatures.OK {
 		registration := new(Registration)
-		e := response.Payload(registration)
+		e := replyEvent.Payload(registration)
 		if e == nil {
 			session.Registrations[registration.ID] = endpoint
 			return registration, nil
 		}
 	}
-	return nil, ExtractError(response)
+	return nil, ExtractError(replyEvent)
 }
 
 type DeleteResourcePayload struct {
@@ -106,73 +147,27 @@ type DeleteResourcePayload struct {
 }
 
 func (session *Session) Unsubscribe(subscriptionID string) error {
-	request := NewCallEvent(
+	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.unsubscribe"},
 		&DeleteResourcePayload{subscriptionID},
 	)
-	response := session.Call(request)
-	replyFeatures := response.Features()
+	replyEvent := session.Call(callEvent)
+	replyFeatures := replyEvent.Features()
 	if replyFeatures.OK {
 		return nil
 	}
-	return ExtractError(response)
+	return ExtractError(replyEvent)
 }
 
 func (session *Session) Unregister(registrationID string) error {
-	request := NewCallEvent(
+	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.unregister"},
 		&DeleteResourcePayload{registrationID},
 	)
-	response := session.Call(request)
-	replyFeatures := response.Features()
+	replyEvent := session.Call(callEvent)
+	replyFeatures := replyEvent.Features()
 	if replyFeatures.OK {
 		return nil
 	}
-	return ExtractError(response)
-}
-
-// RENAME
-func Initialize(session *Session) {
-	go session.peer.Consume()
-
-	session.peer.IncomingPublishEvents.Consume(
-		func(request PublishEvent) {
-			acceptEvent := NewAcceptEvent(request.ID())
-			e := session.peer.Transport.Send(acceptEvent)
-			if e != nil {
-				log.Printf("accept not sent (session.ID=%s) %s", session.ID(), e)
-			}
-			route := request.Route()
-			endpoint, exist := session.Subscriptions[route.EndpointID]
-			if exist {
-				endpoint(request)
-			} else {
-				log.Printf(
-					"subscription not found (session.ID=%s route.ID=%s publisher.ID=%s)",
-					session.ID(), route.EndpointID, route.PublisherID,
-				)
-			}
-		},
-		func() {},
-	)
-
-	session.peer.IncomingCallEvents.Consume(
-		func(request CallEvent) {
-			route := request.Route()
-			endpoint, exist := session.Registrations[route.EndpointID]
-			if exist {
-				response := endpoint(request)
-				e := session.peer.Transport.Send(response)
-				if e != nil {
-					log.Printf("reply not sent (session.ID=%s) %s", session.ID(), e)
-				}
-			} else {
-				log.Printf(
-					"registration not found (session.ID=%s route.ID=%s caller.ID=%s)",
-					session.ID(), route.EndpointID, route.CallerID,
-				)
-			}
-		},
-		func() {},
-	)
+	return ExtractError(replyEvent)
 }

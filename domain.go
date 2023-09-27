@@ -15,38 +15,38 @@ const (
 	MK_REPLY               = -127
 )
 
-type MessageProto[F any] struct {
+type messageProto[F any] struct {
 	id       string
 	kind     MessageKind
 	features F
 }
 
-func (message *MessageProto[F]) ID() string {
+func (message *messageProto[F]) ID() string {
 	return message.id
 }
 
-func (message *MessageProto[F]) Kind() MessageKind {
+func (message *messageProto[F]) Kind() MessageKind {
 	return message.kind
 }
 
-func (message *MessageProto[F]) Features() F {
+func (message *messageProto[F]) Features() F {
 	return message.features
 }
 
-type MessagePayload interface {
+type messagePayload interface {
 	Content() any
 	Payload(any) error
 }
 
-type MessagePayloadField[T any] struct {
+type messagePayloadField[T any] struct {
 	payload T
 }
 
-func (field *MessagePayloadField[T]) Content() any {
+func (field *messagePayloadField[T]) Content() any {
 	return field.payload
 }
 
-func (field *MessagePayloadField[T]) Payload(__v any) error {
+func (field *messagePayloadField[T]) Payload(__v any) error {
 	v, ok := __v.(*T)
 	if ok {
 		*v = field.payload
@@ -55,11 +55,11 @@ func (field *MessagePayloadField[T]) Payload(__v any) error {
 	return errors.New("InvalidPayload")
 }
 
-type MessageRouteField[T any] struct {
+type messageRouteField[T any] struct {
 	route T
 }
 
-func (field *MessageRouteField[T]) Route() T {
+func (field *messageRouteField[T]) Route() T {
 	return field.route
 }
 
@@ -79,25 +79,25 @@ type PublishEvent interface {
 	ID() string
 	Kind() MessageKind
 	Features() *PublishFeatures
-	MessagePayload
+	messagePayload
 	Route() *PublishRoute
 }
 
-func MakePublishEvent(id string, features *PublishFeatures, data MessagePayload, route *PublishRoute) PublishEvent {
+func MakePublishEvent(id string, features *PublishFeatures, data messagePayload, route *PublishRoute) PublishEvent {
 	type message struct {
-		*MessageProto[*PublishFeatures]
-		*MessageRouteField[*PublishRoute]
-		MessagePayload
+		*messageProto[*PublishFeatures]
+		*messageRouteField[*PublishRoute]
+		messagePayload
 	}
 	return &message{
-		&MessageProto[*PublishFeatures]{id, MK_PUBLISH, features},
-		&MessageRouteField[*PublishRoute]{route},
+		&messageProto[*PublishFeatures]{id, MK_PUBLISH, features},
+		&messageRouteField[*PublishRoute]{route},
 		data,
 	}
 }
 
 func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
-	return MakePublishEvent(uuid.NewString(), features, &MessagePayloadField[T]{data}, new(PublishRoute))
+	return MakePublishEvent(uuid.NewString(), features, &messagePayloadField[T]{data}, new(PublishRoute))
 }
 
 type AcceptFeatures struct {
@@ -111,7 +111,7 @@ type AcceptEvent interface {
 }
 
 func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
-	return &MessageProto[*AcceptFeatures]{id, MK_ACCEPT, features}
+	return &messageProto[*AcceptFeatures]{id, MK_ACCEPT, features}
 }
 
 func NewAcceptEvent(sourceID string) AcceptEvent {
@@ -133,25 +133,25 @@ type CallEvent interface {
 	ID() string
 	Kind() MessageKind
 	Features() *CallFeatures
-	MessagePayload
+	messagePayload
 	Route() *CallRoute
 }
 
-func MakeCallEvent(id string, features *CallFeatures, data MessagePayload, route *CallRoute) CallEvent {
+func MakeCallEvent(id string, features *CallFeatures, data messagePayload, route *CallRoute) CallEvent {
 	type message struct {
-		*MessageProto[*CallFeatures]
-		*MessageRouteField[*CallRoute]
-		MessagePayload
+		*messageProto[*CallFeatures]
+		*messageRouteField[*CallRoute]
+		messagePayload
 	}
 	return &message{
-		&MessageProto[*CallFeatures]{id, MK_CALL, features},
-		&MessageRouteField[*CallRoute]{route},
+		&messageProto[*CallFeatures]{id, MK_CALL, features},
+		&messageRouteField[*CallRoute]{route},
 		data,
 	}
 }
 
 func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
-	return MakeCallEvent(uuid.NewString(), features, &MessagePayloadField[T]{data}, new(CallRoute))
+	return MakeCallEvent(uuid.NewString(), features, &messagePayloadField[T]{data}, new(CallRoute))
 }
 
 type ReplyFeatures struct {
@@ -163,19 +163,19 @@ type ReplyEvent interface {
 	ID() string
 	Kind() MessageKind
 	Features() *ReplyFeatures
-	MessagePayload
+	messagePayload
 }
 
-func MakeReplyEvent(id string, features *ReplyFeatures, data MessagePayload) ReplyEvent {
+func MakeReplyEvent(id string, features *ReplyFeatures, data messagePayload) ReplyEvent {
 	type message struct {
-		*MessageProto[*ReplyFeatures]
-		MessagePayload
+		*messageProto[*ReplyFeatures]
+		messagePayload
 	}
-	return &message{&MessageProto[*ReplyFeatures]{id, MK_REPLY, features}, data}
+	return &message{&messageProto[*ReplyFeatures]{id, MK_REPLY, features}, data}
 }
 
 func NewReplyEvent[T any](invocationID string, data T) ReplyEvent {
-	return MakeReplyEvent(uuid.NewString(), &ReplyFeatures{true, invocationID}, &MessagePayloadField[T]{data})
+	return MakeReplyEvent(uuid.NewString(), &ReplyFeatures{true, invocationID}, &messagePayloadField[T]{data})
 }
 
 type ErrorPayload struct {
@@ -185,7 +185,7 @@ type ErrorPayload struct {
 func NewErrorEvent(invocationID string, e error) ReplyEvent {
 	errorMessage := e.Error()
 	payload := ErrorPayload{errorMessage}
-	data := MessagePayloadField[ErrorPayload]{payload}
+	data := messagePayloadField[ErrorPayload]{payload}
 	return MakeReplyEvent(uuid.NewString(), &ReplyFeatures{false, invocationID}, &data)
 }
 

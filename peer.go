@@ -69,7 +69,7 @@ func (peer *Peer) Consume() {
 			e = errors.New("InvalidEvent")
 		}
 		if e != nil {
-			log.Printf("peer %s", e)
+			log.Printf("[peer] %s (ID=%s)", e, peer.ID)
 		}
 	}
 	peer.publishEventProducer.Close()
