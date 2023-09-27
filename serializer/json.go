@@ -21,7 +21,9 @@ func (field *jsonPayloadField) Payload(v any) error {
 
 type JSONSerializer struct{}
 
-var DefaultJSONSerializer = JSONSerializer{}
+func (JSONSerializer) Code() string {
+	return "json"
+}
 
 func (JSONSerializer) Encode(event client.Event) ([]byte, error) {
 	switch event := event.(type) {
@@ -73,7 +75,8 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 	message := new(jsonFieldKind)
 	e = json.Unmarshal(v, message)
 	if e == nil {
-		if message.Kind == client.MK_ACCEPT {
+		switch message.Kind {
+		case client.MK_ACCEPT:
 			type jsonAcceptMessage struct {
 				ID       string                 `json:"ID"`
 				Kind     client.MessageKind     `json:"kind"`
@@ -82,7 +85,7 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := jsonAcceptMessage{}
 			e = json.Unmarshal(v, &message)
 			event = client.MakeAcceptEvent(message.ID, message.Features)
-		} else if message.Kind == client.MK_REPLY {
+		case client.MK_REPLY:
 			type jsonReplyMessage struct {
 				ID       string                `json:"ID"`
 				Kind     client.MessageKind    `json:"kind"`
@@ -92,7 +95,7 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := jsonReplyMessage{}
 			e = json.Unmarshal(v, &message)
 			event = client.MakeReplyEvent(message.ID, message.Features, &jsonPayloadField{message.Payload})
-		} else if message.Kind == client.MK_PUBLISH {
+		case client.MK_PUBLISH:
 			type jsonPublishMessage struct {
 				ID       string                  `json:"ID"`
 				Kind     client.MessageKind      `json:"kind"`
@@ -103,7 +106,7 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := jsonPublishMessage{Route: new(client.PublishRoute)}
 			e = json.Unmarshal(v, &message)
 			event = client.MakePublishEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
-		} else if message.Kind == client.MK_CALL {
+		case client.MK_CALL:
 			type jsonCallMessage struct {
 				ID       string               `json:"ID"`
 				Kind     client.MessageKind   `json:"kind"`
@@ -114,7 +117,7 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := jsonCallMessage{Route: new(client.CallRoute)}
 			e = json.Unmarshal(v, &message)
 			event = client.MakeCallEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
-		} else {
+		default:
 			e = errors.New("InvalidEvent")
 		}
 		if e == nil {
@@ -123,3 +126,5 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 	}
 	return nil, e
 }
+
+var DefaultJSONSerializer JSONSerializer

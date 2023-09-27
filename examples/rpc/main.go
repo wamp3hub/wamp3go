@@ -7,40 +7,34 @@ import (
 	wamp_transport "wamp3go/transport"
 )
 
+type EchoPayload struct {
+	Message string
+}
+
+func echo(callEvent wamp.CallEvent) wamp.ReplyEvent {
+	payload := new(EchoPayload)
+	callEvent.Payload(payload)
+	replyEvent := wamp.NewReplyEvent(callEvent.ID(), payload)
+	return replyEvent
+}
+
 func main() {
 	session, e := wamp_transport.WebsocketJoin(
 		"0.0.0.0:9999",
-		&wamp.JoinPayload{"asia/almaty", "json"},
 		&wamp_serializer.DefaultJSONSerializer,
 	)
 	if e != nil {
-		panic("WebSocket Join")
+		panic("WebSocket Join Error")
 	}
 
-	type EchoPayload struct {
-		Message string
-	}
-
-	registration, e := session.Register(
-		"example.echo",
-		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
-			payload := new(EchoPayload)
-			callEvent.Payload(payload)
-			replyEvent := wamp.NewReplyEvent(callEvent.ID(), payload)
-			return replyEvent
-		},
-	)
+	registration, e := session.Register("example.echo", &wamp.RegisterOptions{}, echo)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
-		panic("RegistrationError")
+		panic("RegisterError")
 	}
 
-	callEvent := wamp.NewCallEvent(
-		&wamp.CallFeatures{"example.echo"},
-		EchoPayload{"Hello, WAMP!"},
-	)
+	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.echo"}, EchoPayload{"Hello, WAMP!"})
 	replyEvent := session.Call(callEvent)
 
 	replyFeatures := replyEvent.Features()

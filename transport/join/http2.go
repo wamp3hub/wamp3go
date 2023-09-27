@@ -1,4 +1,4 @@
-package wamp3go
+package join
 
 import (
 	"bytes"
@@ -10,7 +10,6 @@ import (
 )
 
 type JoinPayload struct {
-	Timezone   string `json:"timezone"`
 	Serializer string `json:"serializer"`
 }
 
@@ -19,8 +18,11 @@ type SuccessJoinPayload struct {
 	Token  string `json:"token"`
 }
 
-// RENAME
-func Join(address string, requestPayload *JoinPayload) (*SuccessJoinPayload, error) {
+type JoinErrorPayload struct {
+	Code string `json:"code"`
+}
+
+func HTTP2Join(address string, requestPayload *JoinPayload) (*SuccessJoinPayload, error) {
 	requestBodyBytes, e := json.Marshal(requestPayload)
 	if e == nil {
 		requestBody := bytes.NewBuffer(requestBodyBytes)
@@ -41,7 +43,7 @@ func Join(address string, requestPayload *JoinPayload) (*SuccessJoinPayload, err
 						return &responsePayload, nil
 					}
 				} else {
-					responsePayload := ErrorPayload{}
+					responsePayload := JoinErrorPayload{}
 					e = json.Unmarshal(responseBody, &responsePayload)
 					if e == nil {
 						e = errors.New(responsePayload.Code)

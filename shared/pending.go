@@ -1,30 +1,34 @@
-package wamp3go
+package shared
 
 import (
 	"errors"
 	"time"
 )
 
-const DEFAULT_TIMEOUT = 60 * time.Second
+type promise[T any] chan T
 
-type PendingMap[T any] map[string]chan T
+type PendingMap[T any] map[string]promise[T]
+
+func NewPendingMap[T any]() PendingMap[T] {
+	return make(PendingMap[T])
+}
 
 func (pendingMap PendingMap[T]) Catch(
 	key string,
 	timeout time.Duration,
 ) (value T, e error) {
-	promise, exist := pendingMap[key]
+	__promise, exist := pendingMap[key]
 	if !exist {
-		promise = make(chan T)
-		pendingMap[key] = promise
+		__promise = make(promise[T])
+		pendingMap[key] = __promise
 	}
 	select {
-	case value = <-promise:
+	case value = <-__promise:
 	case <-time.After(timeout):
 		e = errors.New("TimedOut")
 	}
 	delete(pendingMap, key)
-	close(promise)
+	close(__promise)
 	return value, e
 }
 
