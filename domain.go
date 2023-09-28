@@ -178,14 +178,14 @@ func NewReplyEvent[T any](invocationID string, data T) ReplyEvent {
 	return MakeReplyEvent(uuid.NewString(), &ReplyFeatures{true, invocationID}, &messagePayloadField[T]{data})
 }
 
-type ErrorPayload struct {
+type ErrorEventPayload struct {
 	Code string `json:"code"`
 }
 
 func NewErrorEvent(invocationID string, e error) ReplyEvent {
 	errorMessage := e.Error()
-	payload := ErrorPayload{errorMessage}
-	data := messagePayloadField[ErrorPayload]{payload}
+	payload := ErrorEventPayload{errorMessage}
+	data := messagePayloadField[ErrorEventPayload]{payload}
 	return MakeReplyEvent(uuid.NewString(), &ReplyFeatures{false, invocationID}, &data)
 }
 

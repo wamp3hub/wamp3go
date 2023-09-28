@@ -9,7 +9,7 @@ import (
 const DEFAULT_TIMEOUT = 60 * time.Second
 
 func ExtractError(event ReplyEvent) error {
-	payload := new(ErrorPayload)
+	payload := new(ErrorEventPayload)
 	e := event.Payload(payload)
 	if e == nil {
 		return errors.New(payload.Code)
@@ -53,6 +53,11 @@ func NewSession(peer *Peer) *Session {
 
 	session.peer.IncomingCallEvents.Consume(
 		func(callEvent CallEvent) {
+			acceptEvent := NewAcceptEvent(callEvent.ID())
+			e := session.peer.Transport.Send(acceptEvent)
+			if e != nil {
+				log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
+			}
 			route := callEvent.Route()
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
@@ -86,11 +91,11 @@ func (session *Session) Call(event CallEvent) (replyEvent ReplyEvent) {
 	e := session.peer.Transport.Send(event)
 	if e == nil {
 		replyEvent, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+		if e == nil {
+			return replyEvent
+		}
 	}
-	if e != nil {
-		replyEvent = NewErrorEvent(event.ID(), e)
-	}
-	return replyEvent
+	return NewErrorEvent(event.ID(), e)
 }
 
 type NewResourcePayload[O any] struct {
