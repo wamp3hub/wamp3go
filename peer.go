@@ -28,6 +28,7 @@ type Peer struct {
 	Transport             Transport
 	PendingAcceptEvents   shared.PendingMap[AcceptEvent]
 	PendingReplyEvents    shared.PendingMap[ReplyEvent]
+	PendingNextEvents     shared.PendingMap[NextEvent]
 	publishEventProducer  *shared.Producer[PublishEvent]
 	IncomingPublishEvents *shared.Consumer[PublishEvent]
 	callEventProducer     *shared.Producer[CallEvent]
@@ -42,6 +43,7 @@ func NewPeer(ID string, transport Transport) *Peer {
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
 		shared.NewPendingMap[ReplyEvent](),
+		shared.NewPendingMap[NextEvent](),
 		publishEventProducer,
 		publishEventConsumer,
 		callEventProducer,
@@ -65,11 +67,14 @@ func (peer *Peer) Consume() {
 			peer.publishEventProducer.Produce(event)
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
+		case NextEvent:
+			features := event.Features()
+			e = peer.PendingNextEvents.Throw(features.GeneratorID, event)
 		default:
 			e = errors.New("InvalidEvent")
 		}
 		if e != nil {
-			log.Printf("[peer] %s (ID=%s)", e, peer.ID)
+			log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 		}
 	}
 	peer.publishEventProducer.Close()

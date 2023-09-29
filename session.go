@@ -4,9 +4,12 @@ import (
 	"errors"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-const DEFAULT_TIMEOUT = 60 * time.Second
+const DEFAULT_TIMEOUT = time.Minute
+const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 func ExtractError(event ReplyEvent) error {
 	payload := new(ErrorEventPayload)
@@ -15,6 +18,65 @@ func ExtractError(event ReplyEvent) error {
 		return errors.New(payload.Code)
 	}
 	return e
+}
+
+var yieldMap = make(map[string]string)
+
+func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
+	generatorID := callEvent.ID()
+	lastYield, exists := yieldMap[generatorID]
+	if !exists {
+		yieldEvent := NewYieldEvent[any](generatorID, nil)
+		e = session.peer.Transport.Send(yieldEvent)
+		if e == nil {
+			// TODO acknowledgment
+			lastYield = yieldEvent.ID()
+			yieldMap[generatorID] = lastYield
+		}
+	}
+
+	nextEvent, e := session.peer.PendingNextEvents.Catch(lastYield, DEFAULT_GENERATOR_LIFETIME)
+	// TODO acknowledgment
+	if e == nil {
+		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
+		e = session.peer.Transport.Send(yieldEvent)
+		if e == nil {
+			// TODO acknowledgment
+			lastYield = yieldEvent.ID()
+			yieldMap[generatorID] = lastYield
+		}
+	}
+
+	return e
+}
+
+var nextMap = make(map[string]string)
+
+func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
+	if yieldEvent.Kind() != MK_YIELD {
+		panic("FirstArgumentMustBeGenerator")
+	}
+
+	generatorID := yieldEvent.ID()
+	lastNext, exsits := nextMap[generatorID]
+	if !exsits {
+		lastNext = generatorID
+	}
+	nextEvent := NewNextEvent(lastNext)
+	e := session.peer.Transport.Send(nextEvent)
+	if e == nil {
+		// TODO acknowledgment
+		response, e := session.peer.PendingReplyEvents.Catch(nextEvent.ID(), timeout)
+		if e == nil {
+			if yieldEvent.Kind() == MK_YIELD {
+				nextMap[generatorID] = response.ID()
+			} else {
+				delete(nextMap, generatorID)
+			}
+			return response
+		}
+	}
+	return NewErrorEvent(uuid.NewString(), e)
 }
 
 type Session struct {
@@ -53,17 +115,19 @@ func NewSession(peer *Peer) *Session {
 
 	session.peer.IncomingCallEvents.Consume(
 		func(callEvent CallEvent) {
-			acceptEvent := NewAcceptEvent(callEvent.ID())
-			e := session.peer.Transport.Send(acceptEvent)
-			if e != nil {
-				log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
-			}
+			// acceptEvent := NewAcceptEvent(callEvent.ID())
+			// e := session.peer.Transport.Send(acceptEvent)
+			// if e != nil {
+			// 	log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
+			// }
 			route := callEvent.Route()
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
 				replyEvent := endpoint(callEvent)
 				e := session.peer.Transport.Send(replyEvent)
-				if e != nil {
+				if e == nil {
+					delete(yieldMap, replyEvent.ID())
+				} else {
 					log.Printf("[session] reply not sent (ID=%s e=%s)", session.ID(), e)
 				}
 			} else {
