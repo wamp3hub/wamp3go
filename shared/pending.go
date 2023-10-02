@@ -46,6 +46,7 @@ func (pendingMap PendingMap[T]) Complete(key string, value T) error {
 	complete, found := pendingMap[key]
 	if found {
 		complete(value)
+		delete(pendingMap, key)
 		return nil
 	}
 	return errors.New("PendingNotFound")

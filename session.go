@@ -20,13 +20,11 @@ func ExtractError(event ReplyEvent) error {
 	return e
 }
 
-var __lastYieldMap = make(map[string]string)
-
 func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
-	generatorID := callEvent.ID()
-	lastYield, exists := __lastYieldMap[generatorID]
+	generatorID := "Y" + callEvent.ID()
+	lastYield, exists := session.lastYieldMap[generatorID]
 	if !exists {
-		yieldEvent := NewYieldEvent[any](generatorID, nil)
+		yieldEvent := NewYieldEvent[any](callEvent.ID(), nil)
 		lastYield = yieldEvent.ID()
 		session.peer.Send(yieldEvent)
 	}
@@ -37,24 +35,22 @@ func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
 		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
 		e = session.peer.Send(yieldEvent)
 		if e == nil {
-			__lastYieldMap[generatorID] = yieldEvent.ID()
+			session.lastYieldMap[generatorID] = yieldEvent.ID()
 		}
 	}
 
 	return e
 }
 
-var lastYieldMap = make(map[string]string)
-
 func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
 	if yieldEvent.Kind() != MK_YIELD {
 		panic("FirstArgumentMustBeGenerator")
 	}
 
-	generatorID := yieldEvent.ID()
-	lastYield, exsits := lastYieldMap[generatorID]
+	generatorID := "N" + yieldEvent.ID()
+	lastYield, exsits := session.lastYieldMap[generatorID]
 	if !exsits {
-		lastYield = generatorID
+		lastYield = yieldEvent.ID()
 	}
 
 	nextEvent := NewNextEvent(lastYield)
@@ -64,9 +60,9 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 		response, done := <-replyEventPromise
 		if done {
 			if yieldEvent.Kind() == MK_YIELD {
-				lastYieldMap[generatorID] = response.ID()
+				session.lastYieldMap[generatorID] = response.ID()
 			} else {
-				delete(lastYieldMap, generatorID)
+				delete(session.lastYieldMap, generatorID)
 			}
 			return response
 		}
@@ -79,6 +75,7 @@ type Session struct {
 	peer          *Peer
 	Subscriptions map[string]publishEndpoint
 	Registrations map[string]callEndpoint
+	lastYieldMap  map[string]string
 }
 
 func (session *Session) ID() string {
@@ -86,7 +83,12 @@ func (session *Session) ID() string {
 }
 
 func NewSession(peer *Peer) *Session {
-	session := Session{peer, make(map[string]publishEndpoint), make(map[string]callEndpoint)}
+	session := Session{
+		peer,
+		make(map[string]publishEndpoint),
+		make(map[string]callEndpoint),
+		make(map[string]string),
+	}
 
 	session.peer.IncomingPublishEvents.Consume(
 		func(publishEvent PublishEvent) {
@@ -111,11 +113,11 @@ func NewSession(peer *Peer) *Session {
 			if exist {
 				replyEvent := endpoint(callEvent)
 
-				delete(__lastYieldMap, callEvent.ID())
+				delete(session.lastYieldMap, callEvent.ID())
 
 				e := session.peer.Send(replyEvent)
 				if e == nil {
-
+					log.Printf("[session] success call (ID=%s)", session.ID())
 				} else {
 					log.Printf("[session] reply not sent (ID=%s)", session.ID())
 				}
