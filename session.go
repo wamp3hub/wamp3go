@@ -28,24 +28,16 @@ func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
 	if !exists {
 		yieldEvent := NewYieldEvent[any](generatorID, nil)
 		lastYield = yieldEvent.ID()
-		acceptEventPromise := session.peer.PendingAcceptEvents.New(lastYield, DEFAULT_TIMEOUT)
-		session.peer.Transport.Send(yieldEvent)
-		<-acceptEventPromise
+		session.peer.Send(yieldEvent)
 	}
 
 	nextEventPromise := session.peer.PendingNextEvents.New(lastYield, DEFAULT_GENERATOR_LIFETIME)
 	nextEvent, done := <-nextEventPromise
 	if done {
-		acceptEvent := NewAcceptEvent(nextEvent.ID())
-		session.peer.Transport.Send(acceptEvent)
-
 		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
-		lastYield = yieldEvent.ID()
-		acceptEventPromise := session.peer.PendingAcceptEvents.New(lastYield, DEFAULT_TIMEOUT)
-		session.peer.Transport.Send(yieldEvent)
-		_, done := <-acceptEventPromise
-		if done {
-			__lastYieldMap[generatorID] = lastYield
+		e = session.peer.Send(yieldEvent)
+		if e == nil {
+			__lastYieldMap[generatorID] = yieldEvent.ID()
 		}
 	}
 
@@ -66,11 +58,9 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 	}
 
 	nextEvent := NewNextEvent(lastYield)
-	acceptEventPromise := session.peer.PendingAcceptEvents.New(nextEvent.ID(), DEFAULT_TIMEOUT)
 	replyEventPromise := session.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
-	session.peer.Transport.Send(nextEvent)
-	_, done := <-acceptEventPromise
-	if done {
+	e := session.peer.Send(nextEvent)
+	if e == nil {
 		response, done := <-replyEventPromise
 		if done {
 			if yieldEvent.Kind() == MK_YIELD {
@@ -82,7 +72,7 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 		}
 	}
 
-	return NewErrorEvent(uuid.NewString(), errors.New("SomethingWentWrong"))
+	return NewErrorEvent(uuid.NewString(), e)
 }
 
 type Session struct {
@@ -100,9 +90,6 @@ func NewSession(peer *Peer) *Session {
 
 	session.peer.IncomingPublishEvents.Consume(
 		func(publishEvent PublishEvent) {
-			acceptEvent := NewAcceptEvent(publishEvent.ID())
-			session.peer.Transport.Send(acceptEvent)
-
 			route := publishEvent.Route()
 			endpoint, exist := session.Subscriptions[route.EndpointID]
 			if exist {
@@ -119,9 +106,6 @@ func NewSession(peer *Peer) *Session {
 
 	session.peer.IncomingCallEvents.Consume(
 		func(callEvent CallEvent) {
-			acceptEvent := NewAcceptEvent(callEvent.ID())
-			session.peer.Transport.Send(acceptEvent)
-
 			route := callEvent.Route()
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
@@ -129,10 +113,8 @@ func NewSession(peer *Peer) *Session {
 
 				delete(__lastYieldMap, callEvent.ID())
 
-				acceptEventPromise := session.peer.PendingAcceptEvents.New(replyEvent.ID(), DEFAULT_TIMEOUT)
-				session.peer.Transport.Send(replyEvent)
-				_, done := <-acceptEventPromise
-				if done {
+				e := session.peer.Send(replyEvent)
+				if e == nil {
 
 				} else {
 					log.Printf("[session] reply not sent (ID=%s)", session.ID())
@@ -151,29 +133,19 @@ func NewSession(peer *Peer) *Session {
 }
 
 func (session *Session) Publish(event PublishEvent) error {
-	acceptEventPromise := session.peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	session.peer.Transport.Send(event)
-	_, done := <-acceptEventPromise
-	if done {
-		return nil
-	}
-	return errors.New("SomethingWentWrong")
+	return session.peer.Send(event)
 }
 
-func (session *Session) Call(event CallEvent) (replyEvent ReplyEvent) {
-	acceptEventPromise := session.peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+func (session *Session) Call(event CallEvent) ReplyEvent {
 	replyEventPromise := session.peer.PendingReplyEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	session.peer.Transport.Send(event)
-	_, done := <-acceptEventPromise
-	if done {
-		replyEvent, done = <-replyEventPromise
+	e := session.peer.Send(event)
+	if e == nil {
+		replyEvent, done := <-replyEventPromise
 		if done {
-			acceptEvent := NewAcceptEvent(replyEvent.ID())
-			session.peer.Transport.Send(acceptEvent)
 			return replyEvent
 		}
 	}
-	return NewErrorEvent(event.ID(), errors.New("SomethingWentWrong"))
+	return NewErrorEvent(event.ID(), e)
 }
 
 type NewResourcePayload[O any] struct {
