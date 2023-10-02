@@ -20,37 +20,39 @@ func ExtractError(event ReplyEvent) error {
 	return e
 }
 
-var yieldMap = make(map[string]string)
+var __lastYieldMap = make(map[string]string)
 
 func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
 	generatorID := callEvent.ID()
-	lastYield, exists := yieldMap[generatorID]
+	lastYield, exists := __lastYieldMap[generatorID]
 	if !exists {
 		yieldEvent := NewYieldEvent[any](generatorID, nil)
-		e = session.peer.Transport.Send(yieldEvent)
-		if e == nil {
-			// TODO acknowledgment
-			lastYield = yieldEvent.ID()
-			yieldMap[generatorID] = lastYield
-		}
+		lastYield = yieldEvent.ID()
+		acceptEventPromise := session.peer.PendingAcceptEvents.New(lastYield, DEFAULT_TIMEOUT)
+		session.peer.Transport.Send(yieldEvent)
+		<-acceptEventPromise
 	}
 
-	nextEvent, e := session.peer.PendingNextEvents.Catch(lastYield, DEFAULT_GENERATOR_LIFETIME)
-	// TODO acknowledgment
-	if e == nil {
+	nextEventPromise := session.peer.PendingNextEvents.New(lastYield, DEFAULT_GENERATOR_LIFETIME)
+	nextEvent, done := <-nextEventPromise
+	if done {
+		acceptEvent := NewAcceptEvent(nextEvent.ID())
+		session.peer.Transport.Send(acceptEvent)
+
 		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
-		e = session.peer.Transport.Send(yieldEvent)
-		if e == nil {
-			// TODO acknowledgment
-			lastYield = yieldEvent.ID()
-			yieldMap[generatorID] = lastYield
+		lastYield = yieldEvent.ID()
+		acceptEventPromise := session.peer.PendingAcceptEvents.New(lastYield, DEFAULT_TIMEOUT)
+		session.peer.Transport.Send(yieldEvent)
+		_, done := <-acceptEventPromise
+		if done {
+			__lastYieldMap[generatorID] = lastYield
 		}
 	}
 
 	return e
 }
 
-var nextMap = make(map[string]string)
+var lastYieldMap = make(map[string]string)
 
 func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
 	if yieldEvent.Kind() != MK_YIELD {
@@ -58,25 +60,29 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 	}
 
 	generatorID := yieldEvent.ID()
-	lastNext, exsits := nextMap[generatorID]
+	lastYield, exsits := lastYieldMap[generatorID]
 	if !exsits {
-		lastNext = generatorID
+		lastYield = generatorID
 	}
-	nextEvent := NewNextEvent(lastNext)
-	e := session.peer.Transport.Send(nextEvent)
-	if e == nil {
-		// TODO acknowledgment
-		response, e := session.peer.PendingReplyEvents.Catch(nextEvent.ID(), timeout)
-		if e == nil {
+
+	nextEvent := NewNextEvent(lastYield)
+	acceptEventPromise := session.peer.PendingAcceptEvents.New(nextEvent.ID(), DEFAULT_TIMEOUT)
+	replyEventPromise := session.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
+	session.peer.Transport.Send(nextEvent)
+	_, done := <-acceptEventPromise
+	if done {
+		response, done := <-replyEventPromise
+		if done {
 			if yieldEvent.Kind() == MK_YIELD {
-				nextMap[generatorID] = response.ID()
+				lastYieldMap[generatorID] = response.ID()
 			} else {
-				delete(nextMap, generatorID)
+				delete(lastYieldMap, generatorID)
 			}
 			return response
 		}
 	}
-	return NewErrorEvent(uuid.NewString(), e)
+
+	return NewErrorEvent(uuid.NewString(), errors.New("SomethingWentWrong"))
 }
 
 type Session struct {
@@ -95,10 +101,8 @@ func NewSession(peer *Peer) *Session {
 	session.peer.IncomingPublishEvents.Consume(
 		func(publishEvent PublishEvent) {
 			acceptEvent := NewAcceptEvent(publishEvent.ID())
-			e := session.peer.Transport.Send(acceptEvent)
-			if e != nil {
-				log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
-			}
+			session.peer.Transport.Send(acceptEvent)
+
 			route := publishEvent.Route()
 			endpoint, exist := session.Subscriptions[route.EndpointID]
 			if exist {
@@ -115,20 +119,23 @@ func NewSession(peer *Peer) *Session {
 
 	session.peer.IncomingCallEvents.Consume(
 		func(callEvent CallEvent) {
-			// acceptEvent := NewAcceptEvent(callEvent.ID())
-			// e := session.peer.Transport.Send(acceptEvent)
-			// if e != nil {
-			// 	log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
-			// }
+			acceptEvent := NewAcceptEvent(callEvent.ID())
+			session.peer.Transport.Send(acceptEvent)
+
 			route := callEvent.Route()
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
 				replyEvent := endpoint(callEvent)
-				e := session.peer.Transport.Send(replyEvent)
-				if e == nil {
-					delete(yieldMap, replyEvent.ID())
+
+				delete(__lastYieldMap, callEvent.ID())
+
+				acceptEventPromise := session.peer.PendingAcceptEvents.New(replyEvent.ID(), DEFAULT_TIMEOUT)
+				session.peer.Transport.Send(replyEvent)
+				_, done := <-acceptEventPromise
+				if done {
+
 				} else {
-					log.Printf("[session] reply not sent (ID=%s e=%s)", session.ID(), e)
+					log.Printf("[session] reply not sent (ID=%s)", session.ID())
 				}
 			} else {
 				log.Printf(
@@ -144,22 +151,29 @@ func NewSession(peer *Peer) *Session {
 }
 
 func (session *Session) Publish(event PublishEvent) error {
-	e := session.peer.Transport.Send(event)
-	if e == nil {
-		_, e = session.peer.PendingAcceptEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+	acceptEventPromise := session.peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	session.peer.Transport.Send(event)
+	_, done := <-acceptEventPromise
+	if done {
+		return nil
 	}
-	return e
+	return errors.New("SomethingWentWrong")
 }
 
 func (session *Session) Call(event CallEvent) (replyEvent ReplyEvent) {
-	e := session.peer.Transport.Send(event)
-	if e == nil {
-		replyEvent, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
-		if e == nil {
+	acceptEventPromise := session.peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	replyEventPromise := session.peer.PendingReplyEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	session.peer.Transport.Send(event)
+	_, done := <-acceptEventPromise
+	if done {
+		replyEvent, done = <-replyEventPromise
+		if done {
+			acceptEvent := NewAcceptEvent(replyEvent.ID())
+			session.peer.Transport.Send(acceptEvent)
 			return replyEvent
 		}
 	}
-	return NewErrorEvent(event.ID(), e)
+	return NewErrorEvent(event.ID(), errors.New("SomethingWentWrong"))
 }
 
 type NewResourcePayload[O any] struct {

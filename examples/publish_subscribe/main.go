@@ -15,7 +15,7 @@ func main() {
 		&wampSerializer.DefaultJSONSerializer,
 	)
 	if e == nil {
-		fmt.Printf("WAMP Join Success")
+		fmt.Printf("WAMP Join Success\n")
 	} else {
 		panic("WAMP Join Error")
 	}

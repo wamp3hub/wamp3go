@@ -58,4 +58,5 @@ func main() {
 		}
 	}
 
+	fmt.Print("generator done\n")
 }

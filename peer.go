@@ -59,17 +59,17 @@ func (peer *Peer) Consume() {
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
-			e = peer.PendingAcceptEvents.Throw(features.SourceID, event)
+			e = peer.PendingAcceptEvents.Complete(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e = peer.PendingReplyEvents.Throw(features.InvocationID, event)
+			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
 		case PublishEvent:
 			peer.publishEventProducer.Produce(event)
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
 		case NextEvent:
 			features := event.Features()
-			e = peer.PendingNextEvents.Throw(features.GeneratorID, event)
+			e = peer.PendingNextEvents.Complete(features.GeneratorID, event)
 		default:
 			e = errors.New("InvalidEvent")
 		}

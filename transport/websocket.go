@@ -46,7 +46,7 @@ func (transport *wsTransport) Receive(q client.QEvent) {
 		if e == nil {
 			q <- event
 		} else {
-			log.Printf("[WSTransport] DecodeMessage: %s", e)
+			log.Printf("[WSTransport] e=%s raw=%s", e, rawMessage)
 		}
 	}
 	close(q)
