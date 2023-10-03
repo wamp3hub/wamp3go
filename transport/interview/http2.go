@@ -1,33 +1,31 @@
-package join
+package interview
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 )
 
-type JoinPayload struct {
-	Serializer string `json:"serializer"`
+type Payload struct {
+	Credentials any `json:"credentials"`
 }
 
-type JoinSuccessPayload struct {
+type ErrorPayload struct {
+	Code string `json:"code"`
+}
+
+type SuccessPayload struct {
 	PeerID string `json:"peerID"`
 	Token  string `json:"token"`
 }
 
-type JoinErrorPayload struct {
-	Code string `json:"code"`
-}
-
-func HTTP2Join(address string, requestPayload *JoinPayload) (*JoinSuccessPayload, error) {
+func HTTP2Interview(address string, requestPayload *Payload) (*SuccessPayload, error) {
 	requestBodyBytes, e := json.Marshal(requestPayload)
 	if e == nil {
 		requestBody := bytes.NewBuffer(requestBodyBytes)
-		url := "http://" + address + "/wamp3/gateway"
-		log.Printf("join request (url=%s)", url)
+		url := "http://" + address + "/wamp3/interview"
 		request, _ := http.NewRequest("POST", url, requestBody)
 		request.Header.Set("Content-Type", "application/json")
 		client := new(http.Client)
@@ -37,13 +35,13 @@ func HTTP2Join(address string, requestPayload *JoinPayload) (*JoinSuccessPayload
 			if e == nil {
 				response.Body.Close()
 				if response.StatusCode == 200 {
-					responsePayload := JoinSuccessPayload{}
+					responsePayload := SuccessPayload{}
 					e = json.Unmarshal(responseBody, &responsePayload)
 					if e == nil {
 						return &responsePayload, nil
 					}
 				} else {
-					responsePayload := JoinErrorPayload{}
+					responsePayload := ErrorPayload{}
 					e = json.Unmarshal(responseBody, &responsePayload)
 					if e == nil {
 						e = errors.New(responsePayload.Code)

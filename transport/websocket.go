@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	client "github.com/wamp3hub/wamp3go"
-	clientJoin "github.com/wamp3hub/wamp3go/transport/join"
+	interview "github.com/wamp3hub/wamp3go/transport/interview"
 
 	"github.com/gorilla/websocket"
 )
@@ -63,25 +63,27 @@ func connectWebsocket(
 	serializer client.Serializer,
 ) (client.Transport, error) {
 	wsAddress := "ws://" + address + "/wamp3/websocket?token=" + token
-	log.Printf("websocket dial %s", wsAddress)
+	log.Printf("[websocket] dial %s", wsAddress)
 	connection, response, e := websocket.DefaultDialer.Dial(wsAddress, nil)
 	if e == nil {
 		return WSTransport(serializer, connection), nil
 	}
-	log.Printf("%s websocket connect %s", response.Status, e)
+	log.Printf("[websocket] %s connect %s", response.Status, e)
 	return nil, e
 }
 
 func WebsocketJoin(
 	address string,
 	serializer client.Serializer,
+	credentials any,
 ) (*client.Session, error) {
-	requestPayload := clientJoin.JoinPayload{serializer.Code()}
-	responsePayload, e := clientJoin.HTTP2Join(address, &requestPayload)
+	payload, e := interview.HTTP2Interview(
+		address, &interview.Payload{credentials},
+	)
 	if e == nil {
-		transport, e := connectWebsocket(address, responsePayload.Token, serializer)
+		transport, e := connectWebsocket(address, payload.Token, serializer)
 		if e == nil {
-			peer := client.NewPeer(responsePayload.PeerID, transport)
+			peer := client.NewPeer(payload.PeerID, transport)
 			go peer.Consume()
 			session := client.NewSession(peer)
 			return session, nil
