@@ -5,37 +5,48 @@ import (
 	"time"
 )
 
-type promise[T any] chan T
+type promise[T any] <-chan T
 
-type PendingMap[T any] map[string]promise[T]
+func NewPromise[T any](timeout time.Duration) (promise[T], func(T), func()) {
+	instance := make(chan T, 1)
+
+	timer := new(time.Timer)
+
+	cancel := func() {
+		timer.Stop()
+		close(instance)
+	}
+
+	timer = time.AfterFunc(timeout, cancel)
+
+	complete := func(value T) {
+		instance <- value
+		cancel()
+	}
+
+	return instance, complete, cancel
+}
+
+type PendingMap[T any] map[string]func(T)
 
 func NewPendingMap[T any]() PendingMap[T] {
 	return make(PendingMap[T])
 }
 
-func (pendingMap PendingMap[T]) Catch(
+func (pendingMap PendingMap[T]) New(
 	key string,
 	timeout time.Duration,
-) (value T, e error) {
-	__promise, exist := pendingMap[key]
-	if !exist {
-		__promise = make(promise[T])
-		pendingMap[key] = __promise
-	}
-	select {
-	case value = <-__promise:
-	case <-time.After(timeout):
-		e = errors.New("TimedOut")
-	}
-	delete(pendingMap, key)
-	close(__promise)
-	return value, e
+) promise[T] {
+	__promise, complete, _ := NewPromise[T](timeout)
+	pendingMap[key] = complete
+	return __promise
 }
 
-func (pendingMap PendingMap[T]) Throw(key string, value T) error {
-	promise, exist := pendingMap[key]
-	if exist {
-		promise <- value
+func (pendingMap PendingMap[T]) Complete(key string, value T) error {
+	complete, found := pendingMap[key]
+	if found {
+		complete(value)
+		delete(pendingMap, key)
 		return nil
 	}
 	return errors.New("PendingNotFound")

@@ -24,8 +24,10 @@ func main() {
 		"0.0.0.0:9999",
 		&wampSerializer.DefaultJSONSerializer,
 	)
-	if e != nil {
-		panic("WebSocket Join Error")
+	if e == nil {
+		fmt.Printf("WAMP Join Success\n")
+	} else {
+		panic("WAMP Join Error")
 	}
 
 	registration, e := session.Register("example.echo", &wamp.RegisterOptions{}, echo)

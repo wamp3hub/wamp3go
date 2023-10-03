@@ -64,6 +64,14 @@ func (JSONSerializer) Encode(event client.Event) ([]byte, error) {
 		}
 		message := jsonCallMessage{event.ID(), event.Kind(), event.Features(), event.Content(), event.Route()}
 		return json.Marshal(message)
+	case client.NextEvent:
+		type jsonNextMessage struct {
+			ID       string               `json:"ID"`
+			Kind     client.MessageKind   `json:"kind"`
+			Features *client.NextFeatures `json:"features"`
+		}
+		message := jsonNextMessage{event.ID(), event.Kind(), event.Features()}
+		return json.Marshal(message)
 	}
 	return nil, errors.New("InvalidEvent")
 }
@@ -82,19 +90,19 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 				Kind     client.MessageKind     `json:"kind"`
 				Features *client.AcceptFeatures `json:"features"`
 			}
-			message := jsonAcceptMessage{}
+			message := new(jsonAcceptMessage)
 			e = json.Unmarshal(v, &message)
 			event = client.MakeAcceptEvent(message.ID, message.Features)
-		case client.MK_REPLY:
+		case client.MK_REPLY, client.MK_YIELD:
 			type jsonReplyMessage struct {
 				ID       string                `json:"ID"`
 				Kind     client.MessageKind    `json:"kind"`
 				Features *client.ReplyFeatures `json:"features"`
 				Payload  json.RawMessage       `json:"payload"`
 			}
-			message := jsonReplyMessage{}
+			message := new(jsonReplyMessage)
 			e = json.Unmarshal(v, &message)
-			event = client.MakeReplyEvent(message.ID, message.Features, &jsonPayloadField{message.Payload})
+			event = client.MakeReplyEvent(message.ID, message.Kind, message.Features, &jsonPayloadField{message.Payload})
 		case client.MK_PUBLISH:
 			type jsonPublishMessage struct {
 				ID       string                  `json:"ID"`
@@ -117,6 +125,15 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := jsonCallMessage{Route: new(client.CallRoute)}
 			e = json.Unmarshal(v, &message)
 			event = client.MakeCallEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
+		case client.MK_NEXT:
+			type jsonNextMessage struct {
+				ID       string               `json:"ID"`
+				Kind     client.MessageKind   `json:"kind"`
+				Features *client.NextFeatures `json:"features"`
+			}
+			message := new(jsonNextMessage)
+			e = json.Unmarshal(v, &message)
+			event = client.MakeNextEvent(message.ID, message.Features)
 		default:
 			e = errors.New("InvalidEvent")
 		}

@@ -7,7 +7,10 @@ import (
 	"github.com/wamp3hub/wamp3go/shared"
 )
 
-type Event any
+type Event interface {
+	ID() string
+	Kind() MessageKind
+}
 
 type QEvent chan Event
 
@@ -28,6 +31,7 @@ type Peer struct {
 	Transport             Transport
 	PendingAcceptEvents   shared.PendingMap[AcceptEvent]
 	PendingReplyEvents    shared.PendingMap[ReplyEvent]
+	PendingNextEvents     shared.PendingMap[NextEvent]
 	publishEventProducer  *shared.Producer[PublishEvent]
 	IncomingPublishEvents *shared.Consumer[PublishEvent]
 	callEventProducer     *shared.Producer[CallEvent]
@@ -42,11 +46,22 @@ func NewPeer(ID string, transport Transport) *Peer {
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
 		shared.NewPendingMap[ReplyEvent](),
+		shared.NewPendingMap[NextEvent](),
 		publishEventProducer,
 		publishEventConsumer,
 		callEventProducer,
 		callEventConsumer,
 	}
+}
+
+func (peer *Peer) Send(event Event) error {
+	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	peer.Transport.Send(event)
+	_, done := <-acceptEventPromise
+	if done {
+		return nil
+	}
+	return errors.New("TimedOut")
 }
 
 func (peer *Peer) Consume() {
@@ -57,19 +72,35 @@ func (peer *Peer) Consume() {
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
-			e = peer.PendingAcceptEvents.Throw(features.SourceID, event)
+			peer.PendingAcceptEvents.Complete(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e = peer.PendingReplyEvents.Throw(features.InvocationID, event)
+			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
+			if e == nil {
+				acceptEvent := NewAcceptEvent(event.ID())
+				peer.Transport.Send(acceptEvent)
+			} else {
+				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
+			}
+		case NextEvent:
+			features := event.Features()
+			e = peer.PendingNextEvents.Complete(features.GeneratorID, event)
+			if e == nil {
+				acceptEvent := NewAcceptEvent(event.ID())
+				peer.Transport.Send(acceptEvent)
+			} else {
+				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
+			}
 		case PublishEvent:
 			peer.publishEventProducer.Produce(event)
+			acceptEvent := NewAcceptEvent(event.ID())
+			peer.Transport.Send(acceptEvent)
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
+			acceptEvent := NewAcceptEvent(event.ID())
+			peer.Transport.Send(acceptEvent)
 		default:
-			e = errors.New("InvalidEvent")
-		}
-		if e != nil {
-			log.Printf("[peer] %s (ID=%s)", e, peer.ID)
+			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}
 	}
 	peer.publishEventProducer.Close()

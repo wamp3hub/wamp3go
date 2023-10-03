@@ -13,7 +13,7 @@ type JoinPayload struct {
 	Serializer string `json:"serializer"`
 }
 
-type SuccessJoinPayload struct {
+type JoinSuccessPayload struct {
 	PeerID string `json:"peerID"`
 	Token  string `json:"token"`
 }
@@ -22,7 +22,7 @@ type JoinErrorPayload struct {
 	Code string `json:"code"`
 }
 
-func HTTP2Join(address string, requestPayload *JoinPayload) (*SuccessJoinPayload, error) {
+func HTTP2Join(address string, requestPayload *JoinPayload) (*JoinSuccessPayload, error) {
 	requestBodyBytes, e := json.Marshal(requestPayload)
 	if e == nil {
 		requestBody := bytes.NewBuffer(requestBodyBytes)
@@ -37,7 +37,7 @@ func HTTP2Join(address string, requestPayload *JoinPayload) (*SuccessJoinPayload
 			if e == nil {
 				response.Body.Close()
 				if response.StatusCode == 200 {
-					responsePayload := SuccessJoinPayload{}
+					responsePayload := JoinSuccessPayload{}
 					e = json.Unmarshal(responseBody, &responsePayload)
 					if e == nil {
 						return &responsePayload, nil

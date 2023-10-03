@@ -4,12 +4,15 @@ import (
 	"errors"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-const DEFAULT_TIMEOUT = 60 * time.Second
+const DEFAULT_TIMEOUT = time.Minute
+const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 func ExtractError(event ReplyEvent) error {
-	payload := new(ErrorPayload)
+	payload := new(ErrorEventPayload)
 	e := event.Payload(payload)
 	if e == nil {
 		return errors.New(payload.Code)
@@ -17,10 +20,62 @@ func ExtractError(event ReplyEvent) error {
 	return e
 }
 
+func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
+	generatorID := "Y" + callEvent.ID()
+	lastYield, exists := session.lastYieldMap[generatorID]
+	if !exists {
+		yieldEvent := NewYieldEvent[any](callEvent.ID(), nil)
+		lastYield = yieldEvent.ID()
+		session.peer.Send(yieldEvent)
+	}
+
+	nextEventPromise := session.peer.PendingNextEvents.New(lastYield, DEFAULT_GENERATOR_LIFETIME)
+	nextEvent, done := <-nextEventPromise
+	if done {
+		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
+		e = session.peer.Send(yieldEvent)
+		if e == nil {
+			session.lastYieldMap[generatorID] = yieldEvent.ID()
+		}
+	}
+
+	return e
+}
+
+func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
+	if yieldEvent.Kind() != MK_YIELD {
+		panic("FirstArgumentMustBeGenerator")
+	}
+
+	generatorID := "N" + yieldEvent.ID()
+	lastYield, exsits := session.lastYieldMap[generatorID]
+	if !exsits {
+		lastYield = yieldEvent.ID()
+	}
+
+	nextEvent := NewNextEvent(lastYield)
+	replyEventPromise := session.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
+	e := session.peer.Send(nextEvent)
+	if e == nil {
+		response, done := <-replyEventPromise
+		if done {
+			if yieldEvent.Kind() == MK_YIELD {
+				session.lastYieldMap[generatorID] = response.ID()
+			} else {
+				delete(session.lastYieldMap, generatorID)
+			}
+			return response
+		}
+	}
+
+	return NewErrorEvent(uuid.NewString(), e)
+}
+
 type Session struct {
 	peer          *Peer
 	Subscriptions map[string]publishEndpoint
 	Registrations map[string]callEndpoint
+	lastYieldMap  map[string]string
 }
 
 func (session *Session) ID() string {
@@ -28,15 +83,15 @@ func (session *Session) ID() string {
 }
 
 func NewSession(peer *Peer) *Session {
-	session := Session{peer, make(map[string]publishEndpoint), make(map[string]callEndpoint)}
+	session := Session{
+		peer,
+		make(map[string]publishEndpoint),
+		make(map[string]callEndpoint),
+		make(map[string]string),
+	}
 
 	session.peer.IncomingPublishEvents.Consume(
 		func(publishEvent PublishEvent) {
-			acceptEvent := NewAcceptEvent(publishEvent.ID())
-			e := session.peer.Transport.Send(acceptEvent)
-			if e != nil {
-				log.Printf("[session] accept not sent (ID=%s e=%s)", session.ID(), e)
-			}
 			route := publishEvent.Route()
 			endpoint, exist := session.Subscriptions[route.EndpointID]
 			if exist {
@@ -57,9 +112,14 @@ func NewSession(peer *Peer) *Session {
 			endpoint, exist := session.Registrations[route.EndpointID]
 			if exist {
 				replyEvent := endpoint(callEvent)
-				e := session.peer.Transport.Send(replyEvent)
-				if e != nil {
-					log.Printf("[session] reply not sent (ID=%s e=%s)", session.ID(), e)
+
+				delete(session.lastYieldMap, callEvent.ID())
+
+				e := session.peer.Send(replyEvent)
+				if e == nil {
+					log.Printf("[session] success call (ID=%s)", session.ID())
+				} else {
+					log.Printf("[session] reply not sent (ID=%s)", session.ID())
 				}
 			} else {
 				log.Printf(
@@ -75,22 +135,19 @@ func NewSession(peer *Peer) *Session {
 }
 
 func (session *Session) Publish(event PublishEvent) error {
-	e := session.peer.Transport.Send(event)
-	if e == nil {
-		_, e = session.peer.PendingAcceptEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
-	}
-	return e
+	return session.peer.Send(event)
 }
 
-func (session *Session) Call(event CallEvent) (replyEvent ReplyEvent) {
-	e := session.peer.Transport.Send(event)
+func (session *Session) Call(event CallEvent) ReplyEvent {
+	replyEventPromise := session.peer.PendingReplyEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	e := session.peer.Send(event)
 	if e == nil {
-		replyEvent, e = session.peer.PendingReplyEvents.Catch(event.ID(), DEFAULT_TIMEOUT)
+		replyEvent, done := <-replyEventPromise
+		if done {
+			return replyEvent
+		}
 	}
-	if e != nil {
-		replyEvent = NewErrorEvent(event.ID(), e)
-	}
-	return replyEvent
+	return NewErrorEvent(event.ID(), e)
 }
 
 type NewResourcePayload[O any] struct {
