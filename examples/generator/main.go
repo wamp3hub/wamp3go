@@ -28,13 +28,11 @@ func main() {
 	reversed := func(callEvent wamp.CallEvent) wamp.ReplyEvent {
 		n := 0
 		e := callEvent.Payload(&n)
-		fmt.Printf("reverse %d\n", n)
 		if e == nil {
-			for i := n; i > 0; i-- {
+			for i := n; i > -1; i-- {
 				session.Yield(callEvent, i)
 			}
-			replyEvent := wamp.NewReplyEvent(callEvent.ID(), 0)
-			return replyEvent
+			return wamp.NewReplyEvent(callEvent.ID(), 0)
 		}
 		return wamp.NewErrorEvent(callEvent.ID(), e)
 	}
@@ -50,16 +48,16 @@ func main() {
 
 	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.reversed"}, n)
 	generator := session.Call(callEvent)
-
+	
 	for i := 0; i < n; i++ {
-		replyEvent := session.Next(generator, wamp.DEFAULT_TIMEOUT)
-		replyFeatures := replyEvent.Features()
+		yieldEvent := session.Next(generator, wamp.DEFAULT_TIMEOUT)
+		replyFeatures := yieldEvent.Features()
 		if replyFeatures.OK {
 			var v int
-			replyEvent.Payload(&v)
+			yieldEvent.Payload(&v)
 			fmt.Printf("call(example.reversed) %d\n", v)
 		} else {
-			e = wamp.ExtractError(replyEvent)
+			e = wamp.ExtractError(yieldEvent)
 			fmt.Printf("call(example.reversed) %s\n", e)
 		}
 	}

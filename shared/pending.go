@@ -2,27 +2,29 @@ package shared
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
-type promise[T any] <-chan T
+type Promise[T any] <-chan T
 
-func NewPromise[T any](timeout time.Duration) (promise[T], func(T), func()) {
+func NewPromise[T any](timeout time.Duration) (Promise[T], func(T), func()) {
 	instance := make(chan T, 1)
 
-	timer := new(time.Timer)
-
-	cancel := func() {
-		timer.Stop()
-		close(instance)
-	}
-
-	timer = time.AfterFunc(timeout, cancel)
+	once := new(sync.Once)
+	cancel := func() { close(instance) }
 
 	complete := func(value T) {
 		instance <- value
-		cancel()
+		once.Do(cancel)
 	}
+
+	await := func() {
+		<-time.After(timeout)
+		once.Do(cancel)
+	}
+
+	go await()
 
 	return instance, complete, cancel
 }
@@ -36,7 +38,7 @@ func NewPendingMap[T any]() PendingMap[T] {
 func (pendingMap PendingMap[T]) New(
 	key string,
 	timeout time.Duration,
-) promise[T] {
+) Promise[T] {
 	__promise, complete, _ := NewPromise[T](timeout)
 	pendingMap[key] = complete
 	return __promise

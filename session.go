@@ -24,7 +24,8 @@ type Session struct {
 	peer          *Peer
 	Subscriptions map[string]publishEndpoint
 	Registrations map[string]callEndpoint
-	lastYieldMap  map[string]string
+	lastIDMap     map[string]string
+	lastYieldMap  map[string]ReplyEvent
 }
 
 func (session *Session) ID() string {
@@ -37,6 +38,7 @@ func NewSession(peer *Peer) *Session {
 		make(map[string]publishEndpoint),
 		make(map[string]callEndpoint),
 		make(map[string]string),
+		make(map[string]ReplyEvent),
 	}
 
 	session.peer.IncomingPublishEvents.Consume(
@@ -62,7 +64,13 @@ func NewSession(peer *Peer) *Session {
 			if exist {
 				replyEvent := endpoint(callEvent)
 
-				delete(session.lastYieldMap, callEvent.ID())
+				lastYield, found := session.lastYieldMap[callEvent.ID()]
+				if found {
+					e := session.peer.Send(lastYield)
+					if e == nil {
+						delete(session.lastYieldMap, callEvent.ID())
+					}
+				}
 
 				e := session.peer.Send(replyEvent)
 				if e == nil {
@@ -179,24 +187,22 @@ func (session *Session) Unregister(registrationID string) error {
 }
 
 func (session *Session) Yield(callEvent CallEvent, payload any) (e error) {
-	generatorID := "Y" + callEvent.ID()
+	generatorID := callEvent.ID()
 	lastYield, exists := session.lastYieldMap[generatorID]
-	if !exists {
-		yieldEvent := NewYieldEvent[any](callEvent.ID(), nil)
-		lastYield = yieldEvent.ID()
-		session.peer.Send(yieldEvent)
-	}
-
-	nextEventPromise := session.peer.PendingNextEvents.New(lastYield, DEFAULT_GENERATOR_LIFETIME)
-	nextEvent, done := <-nextEventPromise
-	if done {
-		yieldEvent := NewYieldEvent(nextEvent.ID(), payload)
-		e = session.peer.Send(yieldEvent)
+	if exists {
+		nextEventPromise := session.peer.PendingNextEvents.New(lastYield.ID(), DEFAULT_GENERATOR_LIFETIME)
+		e = session.peer.Send(lastYield)
 		if e == nil {
-			session.lastYieldMap[generatorID] = yieldEvent.ID()
+			nextEvent, done := <-nextEventPromise
+			if done {
+				lastYield = NewYieldEvent(nextEvent.ID(), payload)
+				session.lastYieldMap[generatorID] = lastYield
+			}
 		}
+	} else {
+		lastYield = NewYieldEvent[any](generatorID, nil)
+		session.lastYieldMap[generatorID] = lastYield
 	}
-
 	return e
 }
 
@@ -205,20 +211,20 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 		panic("FirstArgumentMustBeGenerator")
 	}
 
-	generatorID := "N" + yieldEvent.ID()
-	lastYield, exsits := session.lastYieldMap[generatorID]
+	generatorID := yieldEvent.ID()
+	lastID, exsits := session.lastIDMap[generatorID]
 	if !exsits {
-		lastYield = yieldEvent.ID()
+		lastID = generatorID
 	}
 
-	nextEvent := NewNextEvent(lastYield)
+	nextEvent := NewNextEvent(lastID)
 	replyEventPromise := session.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
 	e := session.peer.Send(nextEvent)
 	if e == nil {
 		response, done := <-replyEventPromise
 		if done {
 			if yieldEvent.Kind() == MK_YIELD {
-				session.lastYieldMap[generatorID] = response.ID()
+				session.lastIDMap[generatorID] = response.ID()
 			} else {
 				delete(session.lastYieldMap, generatorID)
 			}

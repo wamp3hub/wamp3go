@@ -65,7 +65,7 @@ func (peer *Peer) Send(event Event) error {
 }
 
 func (peer *Peer) Consume() {
-	q := make(QEvent)
+	q := make(QEvent, 128)
 	go peer.Transport.Receive(q)
 	for event := range q {
 		e := error(nil)
@@ -77,8 +77,7 @@ func (peer *Peer) Consume() {
 			features := event.Features()
 			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				acceptEvent := NewAcceptEvent(event.ID())
-				peer.Transport.Send(acceptEvent)
+				peer.Transport.Send(NewAcceptEvent(event.ID()))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
@@ -86,19 +85,16 @@ func (peer *Peer) Consume() {
 			features := event.Features()
 			e = peer.PendingNextEvents.Complete(features.GeneratorID, event)
 			if e == nil {
-				acceptEvent := NewAcceptEvent(event.ID())
-				peer.Transport.Send(acceptEvent)
+				peer.Transport.Send(NewAcceptEvent(event.ID()))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case PublishEvent:
 			peer.publishEventProducer.Produce(event)
-			acceptEvent := NewAcceptEvent(event.ID())
-			peer.Transport.Send(acceptEvent)
+			peer.Transport.Send(NewAcceptEvent(event.ID()))
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
-			acceptEvent := NewAcceptEvent(event.ID())
-			peer.Transport.Send(acceptEvent)
+			peer.Transport.Send(NewAcceptEvent(event.ID()))
 		default:
 			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}
