@@ -9,10 +9,16 @@ import (
 	wampTransport "github.com/wamp3hub/wamp3go/transport"
 )
 
+type LoginPayload struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 func main() {
 	session, e := wampTransport.WebsocketJoin(
-		"0.0.0.0:9999",
+		"0.0.0.0:8888",
 		&wampSerializer.DefaultJSONSerializer,
+		&LoginPayload{"test", "test"},
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
