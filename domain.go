@@ -3,7 +3,7 @@ package wamp3go
 import (
 	"errors"
 
-	"github.com/google/uuid"
+	"github.com/rs/xid"
 )
 
 type MessageKind int8
@@ -81,7 +81,7 @@ func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
 
 func NewAcceptEvent(sourceID string) AcceptEvent {
 	features := AcceptFeatures{sourceID}
-	return MakeAcceptEvent(uuid.NewString(), &features)
+	return MakeAcceptEvent(xid.New().String(), &features)
 }
 
 type PublishFeatures struct {
@@ -124,7 +124,7 @@ func MakePublishEvent(
 
 func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		features,
 		&messagePayloadField[T]{data},
 		new(PublishRoute),
@@ -169,7 +169,7 @@ func MakeCallEvent(
 
 func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		features,
 		&messagePayloadField[T]{data},
 		new(CallRoute),
@@ -203,7 +203,7 @@ func MakeReplyEvent(
 
 func NewReplyEvent[T any](invocationID string, data T) ReplyEvent {
 	return MakeReplyEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		MK_REPLY,
 		&ReplyFeatures{true, invocationID},
 		&messagePayloadField[T]{data},
@@ -218,12 +218,12 @@ func NewErrorEvent(invocationID string, e error) ReplyEvent {
 	errorMessage := e.Error()
 	payload := ErrorEventPayload{errorMessage}
 	data := messagePayloadField[ErrorEventPayload]{payload}
-	return MakeReplyEvent(uuid.NewString(), MK_REPLY, &ReplyFeatures{false, invocationID}, &data)
+	return MakeReplyEvent(xid.New().String(), MK_REPLY, &ReplyFeatures{false, invocationID}, &data)
 }
 
 func NewYieldEvent[T any](invocationID string, data T) ReplyEvent {
 	return MakeReplyEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		MK_YIELD,
 		&ReplyFeatures{true, invocationID},
 		&messagePayloadField[T]{data},
@@ -248,7 +248,7 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 }
 
 func NewNextEvent(generatorID string) NextEvent {
-	return MakeNextEvent(uuid.NewString(), &NextFeatures{generatorID})
+	return MakeNextEvent(xid.New().String(), &NextFeatures{generatorID})
 }
 
 type SubscribeOptions struct{}

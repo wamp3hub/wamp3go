@@ -4,8 +4,6 @@ import (
 	"errors"
 	"log"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const DEFAULT_TIMEOUT = time.Minute
@@ -232,5 +230,5 @@ func (session *Session) Next(yieldEvent ReplyEvent, timeout time.Duration) Reply
 		}
 	}
 
-	return NewErrorEvent(uuid.NewString(), e)
+	return NewErrorEvent(nextEvent.ID(), e)
 }

@@ -5,12 +5,12 @@ import (
 
 	client "github.com/wamp3hub/wamp3go"
 
-	"github.com/google/uuid"
+	"github.com/rs/xid"
 )
 
 func testPublishEventSerializer(t *testing.T, serializer client.Serializer) {
 	expectedPayload := "test"
-	expectedFeatures := client.PublishFeatures{"wamp.test", []string{}, []string{uuid.NewString()}}
+	expectedFeatures := client.PublishFeatures{"wamp.test", []string{}, []string{xid.New().String()}}
 	newEvent := client.NewPublishEvent(&expectedFeatures, expectedPayload)
 	raw, e := serializer.Encode(newEvent)
 	if e != nil {
@@ -65,7 +65,7 @@ func testCallEventSerializer(t *testing.T, serializer client.Serializer) {
 }
 
 func testAcceptEventSerializer(t *testing.T, serializer client.Serializer) {
-	expectedSourceID := uuid.NewString()
+	expectedSourceID := xid.New().String()
 	newEvent := client.NewAcceptEvent(expectedSourceID)
 	raw, e := serializer.Encode(newEvent)
 	if e != nil {
@@ -86,7 +86,7 @@ func testAcceptEventSerializer(t *testing.T, serializer client.Serializer) {
 }
 
 func testReplyEventSerializer(t *testing.T, serializer client.Serializer) {
-	invocationID := uuid.NewString()
+	invocationID := xid.New().String()
 	expectedPayload := "test"
 	newEvent := client.NewReplyEvent(invocationID, expectedPayload)
 	raw, e := serializer.Encode(newEvent)
