@@ -13,6 +13,18 @@ type LoginPayload struct {
 	Password string `json:"password"`
 }
 
+func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
+	var n int
+	e := callEvent.Payload(&n)
+	if e == nil {
+		for i := n; i > 0; i-- {
+			wamp.Yield(callEvent, i)
+		}
+		return wamp.NewReplyEvent(callEvent, 0)
+	}
+	return wamp.NewErrorEvent(callEvent, e)
+}
+
 func main() {
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
@@ -25,42 +37,29 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	reversed := func(callEvent wamp.CallEvent) wamp.ReplyEvent {
-		n := 0
-		e := callEvent.Payload(&n)
-		if e == nil {
-			for i := n; i > -1; i-- {
-				session.Yield(callEvent, i)
-			}
-			return wamp.NewReplyEvent(callEvent.ID(), 0)
-		}
-		return wamp.NewErrorEvent(callEvent.ID(), e)
-	}
-
-	registration, e := session.Register("example.reversed", &wamp.RegisterOptions{}, reversed)
+	registration, e := session.Register("example.reverse", &wamp.RegisterOptions{}, reverse)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}
 
-	n := 99
-
-	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.reversed"}, n)
+	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.reverse"}, 99)
 	generator := session.Call(callEvent)
-	
-	for i := 0; i < n; i++ {
-		yieldEvent := session.Next(generator, wamp.DEFAULT_TIMEOUT)
-		replyFeatures := yieldEvent.Features()
-		if replyFeatures.OK {
-			var v int
-			yieldEvent.Payload(&v)
-			fmt.Printf("call(example.reversed) %d\n", v)
+
+	var v int
+	for {
+		yieldEvent := wamp.Next(generator, wamp.DEFAULT_TIMEOUT)
+		e := yieldEvent.Error()
+		if e != nil {
+			fmt.Printf("error(example.reversed): %s\n", e)
+			break
+		} else if yieldEvent.Done() {
+			fmt.Print("generator done\n")
+			break
 		} else {
-			e = wamp.ExtractError(yieldEvent)
-			fmt.Printf("call(example.reversed) %s\n", e)
+			yieldEvent.Payload(&v)
+			fmt.Printf("call(example.reversed): %d\n", v)
 		}
 	}
-
-	fmt.Print("generator done\n")
 }

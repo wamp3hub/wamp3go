@@ -7,11 +7,6 @@ import (
 	"github.com/wamp3hub/wamp3go/shared"
 )
 
-type Event interface {
-	ID() string
-	Kind() MessageKind
-}
-
 type QEvent chan Event
 
 type Serializer interface {
@@ -68,33 +63,34 @@ func (peer *Peer) Consume() {
 	q := make(QEvent, 128)
 	go peer.Transport.Receive(q)
 	for event := range q {
-		e := error(nil)
+		event.bind(peer)
+
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
 			peer.PendingAcceptEvents.Complete(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
+			e := peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				peer.Transport.Send(NewAcceptEvent(event.ID()))
+				peer.Transport.Send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case NextEvent:
 			features := event.Features()
-			e = peer.PendingNextEvents.Complete(features.GeneratorID, event)
+			e := peer.PendingNextEvents.Complete(features.YieldID, event)
 			if e == nil {
-				peer.Transport.Send(NewAcceptEvent(event.ID()))
+				peer.Transport.Send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case PublishEvent:
 			peer.publishEventProducer.Produce(event)
-			peer.Transport.Send(NewAcceptEvent(event.ID()))
+			peer.Transport.Send(newAcceptEvent(event))
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
-			peer.Transport.Send(NewAcceptEvent(event.ID()))
+			peer.Transport.Send(newAcceptEvent(event))
 		default:
 			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}

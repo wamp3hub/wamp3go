@@ -3,7 +3,7 @@ package wamp3go
 import (
 	"errors"
 
-	"github.com/google/uuid"
+	"github.com/rs/xid"
 )
 
 type MessageKind int8
@@ -15,12 +15,14 @@ const (
 	MK_NEXT                = 126
 	MK_REPLY               = -127
 	MK_YIELD               = -126
+	MK_ERROR               = -125
 )
 
 type messageProto[F any] struct {
 	id       string
 	kind     MessageKind
 	features F
+	peer     *Peer
 }
 
 func (message *messageProto[F]) ID() string {
@@ -33,6 +35,14 @@ func (message *messageProto[F]) Kind() MessageKind {
 
 func (message *messageProto[F]) Features() F {
 	return message.features
+}
+
+func (message *messageProto[F]) bind(instance *Peer) {
+	message.peer = instance
+}
+
+func (message *messageProto[F]) Peer() *Peer {
+	return message.peer
 }
 
 type messagePayload interface {
@@ -65,23 +75,29 @@ func (field *messageRouteField[T]) Route() T {
 	return field.route
 }
 
+type Event interface {
+	ID() string
+	Kind() MessageKind
+	bind(*Peer)
+	Peer() *Peer
+}
+
 type AcceptFeatures struct {
 	SourceID string `json:"sourceID"`
 }
 
 type AcceptEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *AcceptFeatures
 }
 
 func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
-	return &messageProto[*AcceptFeatures]{id, MK_ACCEPT, features}
+	return &messageProto[*AcceptFeatures]{id, MK_ACCEPT, features, nil}
 }
 
-func NewAcceptEvent(sourceID string) AcceptEvent {
-	features := AcceptFeatures{sourceID}
-	return MakeAcceptEvent(uuid.NewString(), &features)
+func newAcceptEvent(source Event) AcceptEvent {
+	features := AcceptFeatures{source.ID()}
+	return MakeAcceptEvent(xid.New().String(), &features)
 }
 
 type PublishFeatures struct {
@@ -97,8 +113,7 @@ type PublishRoute struct {
 }
 
 type PublishEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *PublishFeatures
 	messagePayload
 	Route() *PublishRoute
@@ -116,7 +131,7 @@ func MakePublishEvent(
 		messagePayload
 	}
 	return &message{
-		&messageProto[*PublishFeatures]{id, MK_PUBLISH, features},
+		&messageProto[*PublishFeatures]{id, MK_PUBLISH, features, nil},
 		&messageRouteField[*PublishRoute]{route},
 		data,
 	}
@@ -124,7 +139,7 @@ func MakePublishEvent(
 
 func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		features,
 		&messagePayloadField[T]{data},
 		new(PublishRoute),
@@ -142,8 +157,7 @@ type CallRoute struct {
 }
 
 type CallEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *CallFeatures
 	messagePayload
 	Route() *CallRoute
@@ -161,7 +175,7 @@ func MakeCallEvent(
 		messagePayload
 	}
 	return &message{
-		&messageProto[*CallFeatures]{id, MK_CALL, features},
+		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
 	}
@@ -169,7 +183,7 @@ func MakeCallEvent(
 
 func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		features,
 		&messagePayloadField[T]{data},
 		new(CallRoute),
@@ -177,15 +191,37 @@ func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 }
 
 type ReplyFeatures struct {
-	OK           bool   `json:"OK"`
 	InvocationID string `json:"invocationID"`
 }
 
 type ReplyEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *ReplyFeatures
+	Error() error
+	Done() bool
 	messagePayload
+}
+
+type replyMessage struct {
+	*messageProto[*ReplyFeatures]
+	messagePayload
+}
+
+func (message *replyMessage) Done() bool {
+	return message.Kind() != MK_YIELD
+}
+
+func (message *replyMessage) Error() error {
+	if message.Kind() != MK_ERROR {
+		return nil
+	}
+
+	payload := new(ErrorEventPayload)
+	e := message.Payload(payload)
+	if e == nil {
+		return errors.New(payload.Code)
+	}
+	return e
 }
 
 func MakeReplyEvent(
@@ -194,18 +230,14 @@ func MakeReplyEvent(
 	features *ReplyFeatures,
 	data messagePayload,
 ) ReplyEvent {
-	type message struct {
-		*messageProto[*ReplyFeatures]
-		messagePayload
-	}
-	return &message{&messageProto[*ReplyFeatures]{id, kind, features}, data}
+	return &replyMessage{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
 }
 
-func NewReplyEvent[T any](invocationID string, data T) ReplyEvent {
+func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		MK_REPLY,
-		&ReplyFeatures{true, invocationID},
+		&ReplyFeatures{source.ID()},
 		&messagePayloadField[T]{data},
 	)
 }
@@ -214,29 +246,28 @@ type ErrorEventPayload struct {
 	Code string `json:"code"`
 }
 
-func NewErrorEvent(invocationID string, e error) ReplyEvent {
+func NewErrorEvent(source Event, e error) ReplyEvent {
 	errorMessage := e.Error()
 	payload := ErrorEventPayload{errorMessage}
 	data := messagePayloadField[ErrorEventPayload]{payload}
-	return MakeReplyEvent(uuid.NewString(), MK_REPLY, &ReplyFeatures{false, invocationID}, &data)
+	return MakeReplyEvent(xid.New().String(), MK_ERROR, &ReplyFeatures{source.ID()}, &data)
 }
 
-func NewYieldEvent[T any](invocationID string, data T) ReplyEvent {
+func newYieldEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		uuid.NewString(),
+		xid.New().String(),
 		MK_YIELD,
-		&ReplyFeatures{true, invocationID},
+		&ReplyFeatures{ source.ID()},
 		&messagePayloadField[T]{data},
 	)
 }
 
 type NextFeatures struct {
-	GeneratorID string `json:"generatorID"`
+	YieldID string `json:"yieldID"`
 }
 
 type NextEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *NextFeatures
 }
 
@@ -244,11 +275,11 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 	type message struct {
 		*messageProto[*NextFeatures]
 	}
-	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features}}
+	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features, nil}}
 }
 
-func NewNextEvent(generatorID string) NextEvent {
-	return MakeNextEvent(uuid.NewString(), &NextFeatures{generatorID})
+func newNextEvent(generatorID string) NextEvent {
+	return MakeNextEvent(xid.New().String(), &NextFeatures{generatorID})
 }
 
 type SubscribeOptions struct{}
