@@ -93,7 +93,7 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 			message := new(jsonAcceptMessage)
 			e = json.Unmarshal(v, &message)
 			event = client.MakeAcceptEvent(message.ID, message.Features)
-		case client.MK_REPLY, client.MK_YIELD:
+		case client.MK_REPLY, client.MK_ERROR, client.MK_YIELD:
 			type jsonReplyMessage struct {
 				ID       string                `json:"ID"`
 				Kind     client.MessageKind    `json:"kind"`

@@ -73,24 +73,24 @@ func (peer *Peer) Consume() {
 			features := event.Features()
 			e := peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				peer.Transport.Send(NewAcceptEvent(event.ID()))
+				peer.Transport.Send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case NextEvent:
 			features := event.Features()
-			e := peer.PendingNextEvents.Complete(features.GeneratorID, event)
+			e := peer.PendingNextEvents.Complete(features.YieldID, event)
 			if e == nil {
-				peer.Transport.Send(NewAcceptEvent(event.ID()))
+				peer.Transport.Send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case PublishEvent:
 			peer.publishEventProducer.Produce(event)
-			peer.Transport.Send(NewAcceptEvent(event.ID()))
+			peer.Transport.Send(newAcceptEvent(event))
 		case CallEvent:
 			peer.callEventProducer.Produce(event)
-			peer.Transport.Send(NewAcceptEvent(event.ID()))
+			peer.Transport.Send(newAcceptEvent(event))
 		default:
 			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}

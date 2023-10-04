@@ -1,7 +1,6 @@
 package wamp3go
 
 import (
-	"errors"
 	"log"
 	"time"
 )
@@ -10,18 +9,9 @@ const DEFAULT_TIMEOUT = time.Minute
 const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 var (
-	lastIDMap     map[string]string = make(map[string]string)
-	lastYieldMap  map[string]ReplyEvent = make(map[string]ReplyEvent)
+	lastIDMap    map[string]string     = make(map[string]string)
+	nextYieldMap map[string]ReplyEvent = make(map[string]ReplyEvent)
 )
-
-func ExtractError(event ReplyEvent) error {
-	payload := new(ErrorEventPayload)
-	e := event.Payload(payload)
-	if e == nil {
-		return errors.New(payload.Code)
-	}
-	return e
-}
 
 type Session struct {
 	peer          *Peer
@@ -43,8 +33,8 @@ func NewSession(peer *Peer) *Session {
 	session.peer.IncomingPublishEvents.Consume(
 		func(publishEvent PublishEvent) {
 			route := publishEvent.Route()
-			endpoint, exist := session.Subscriptions[route.EndpointID]
-			if exist {
+			endpoint, found := session.Subscriptions[route.EndpointID]
+			if found {
 				endpoint(publishEvent)
 			} else {
 				log.Printf(
@@ -59,19 +49,20 @@ func NewSession(peer *Peer) *Session {
 	session.peer.IncomingCallEvents.Consume(
 		func(callEvent CallEvent) {
 			route := callEvent.Route()
-			endpoint, exist := session.Registrations[route.EndpointID]
-			if exist {
+			endpoint, found := session.Registrations[route.EndpointID]
+			if found {
 				replyEvent := endpoint(callEvent)
 
-				lastYield, found := lastYieldMap[callEvent.ID()]
+				generatorID := callEvent.ID()
+				nextYieldEvent, found := nextYieldMap[generatorID]
 				if found {
-					delete(lastYieldMap, callEvent.ID())
-					nextEventPromise := peer.PendingNextEvents.New(lastYield.ID(), DEFAULT_GENERATOR_LIFETIME)
-					e := session.peer.Send(lastYield)
+					delete(nextYieldMap, generatorID)
+					nextEventPromise := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
+					e := session.peer.Send(nextYieldEvent)
 					if e == nil {
 						nextEvent, done := <-nextEventPromise
 						if done {
-							replyEvent = NewReplyEvent(nextEvent.ID(), replyEvent.Content())
+							replyEvent = NewReplyEvent(nextEvent, replyEvent.Content())
 						}
 					}
 				}
@@ -108,7 +99,7 @@ func (session *Session) Call(event CallEvent) ReplyEvent {
 			return replyEvent
 		}
 	}
-	return NewErrorEvent(event.ID(), e)
+	return NewErrorEvent(event, e)
 }
 
 type NewResourcePayload[O any] struct {
@@ -126,8 +117,7 @@ func (session *Session) Subscribe(
 		&NewResourcePayload[SubscribeOptions]{uri, features},
 	)
 	replyEvent := session.Call(callEvent)
-	replyFeatures := replyEvent.Features()
-	if replyFeatures.OK {
+	if replyEvent.Error() == nil {
 		subscription := new(Subscription)
 		e := replyEvent.Payload(subscription)
 		if e == nil {
@@ -135,7 +125,7 @@ func (session *Session) Subscribe(
 			return subscription, nil
 		}
 	}
-	return nil, ExtractError(replyEvent)
+	return nil, replyEvent.Error()
 }
 
 func (session *Session) Register(
@@ -148,8 +138,7 @@ func (session *Session) Register(
 		&NewResourcePayload[RegisterOptions]{uri, features},
 	)
 	replyEvent := session.Call(callEvent)
-	replyFeatures := replyEvent.Features()
-	if replyFeatures.OK {
+	if replyEvent.Error() == nil {
 		registration := new(Registration)
 		e := replyEvent.Payload(registration)
 		if e == nil {
@@ -157,7 +146,7 @@ func (session *Session) Register(
 			return registration, nil
 		}
 	}
-	return nil, ExtractError(replyEvent)
+	return nil, replyEvent.Error()
 }
 
 type DeleteResourcePayload struct {
@@ -170,11 +159,10 @@ func (session *Session) Unsubscribe(subscriptionID string) error {
 		&DeleteResourcePayload{subscriptionID},
 	)
 	replyEvent := session.Call(callEvent)
-	replyFeatures := replyEvent.Features()
-	if replyFeatures.OK {
+	if replyEvent.Error() == nil {
 		return nil
 	}
-	return ExtractError(replyEvent)
+	return replyEvent.Error()
 }
 
 func (session *Session) Unregister(registrationID string) error {
@@ -183,53 +171,52 @@ func (session *Session) Unregister(registrationID string) error {
 		&DeleteResourcePayload{registrationID},
 	)
 	replyEvent := session.Call(callEvent)
-	replyFeatures := replyEvent.Features()
-	if replyFeatures.OK {
+	if replyEvent.Error() == nil {
 		return nil
 	}
-	return ExtractError(replyEvent)
+	return replyEvent.Error()
 }
 
 func Yield(callEvent CallEvent, payload any) (e error) {
-	peer := callEvent.Peer()
 	generatorID := callEvent.ID()
-	lastYield, exists := lastYieldMap[generatorID]
+	nextYieldEvent, exists := nextYieldMap[generatorID]
 	if exists {
-		nextEventPromise := peer.PendingNextEvents.New(lastYield.ID(), DEFAULT_GENERATOR_LIFETIME)
-		e = peer.Send(lastYield)
+		peer := callEvent.Peer()
+		nextEventPromise := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
+		e = peer.Send(nextYieldEvent)
 		if e == nil {
 			nextEvent, done := <-nextEventPromise
 			if done {
-				lastYield = NewYieldEvent(nextEvent.ID(), payload)
-				lastYieldMap[generatorID] = lastYield
+				nextYieldEvent = newYieldEvent(nextEvent, payload)
+				nextYieldMap[generatorID] = nextYieldEvent
 			}
 		}
 	} else {
-		lastYield = NewYieldEvent[any](generatorID, nil)
-		lastYieldMap[generatorID] = lastYield
+		nextYieldEvent = newYieldEvent[any](callEvent, nil)
+		nextYieldMap[generatorID] = nextYieldEvent
 	}
 	return e
 }
 
-func Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
-	if yieldEvent.Kind() != MK_YIELD {
+func Next(generator ReplyEvent, timeout time.Duration) ReplyEvent {
+	if generator.Kind() != MK_YIELD {
 		panic("FirstArgumentMustBeGenerator")
 	}
 
-	peer := yieldEvent.Peer()
-	generatorID := yieldEvent.ID()
+	generatorID := generator.ID()
 	lastID, exsits := lastIDMap[generatorID]
 	if !exsits {
 		lastID = generatorID
 	}
 
-	nextEvent := NewNextEvent(lastID)
+	peer := generator.Peer()
+	nextEvent := newNextEvent(lastID)
 	replyEventPromise := peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
 	e := peer.Send(nextEvent)
 	if e == nil {
 		response, done := <-replyEventPromise
 		if done {
-			if yieldEvent.Kind() == MK_YIELD {
+			if generator.Kind() == MK_YIELD {
 				lastIDMap[generatorID] = response.ID()
 			} else {
 				delete(lastIDMap, generatorID)
@@ -238,5 +225,5 @@ func Next(yieldEvent ReplyEvent, timeout time.Duration) ReplyEvent {
 		}
 	}
 
-	return NewErrorEvent(nextEvent.ID(), e)
+	return NewErrorEvent(nextEvent, e)
 }
