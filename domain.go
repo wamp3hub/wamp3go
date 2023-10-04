@@ -21,6 +21,7 @@ type messageProto[F any] struct {
 	id       string
 	kind     MessageKind
 	features F
+	peer     *Peer
 }
 
 func (message *messageProto[F]) ID() string {
@@ -33,6 +34,14 @@ func (message *messageProto[F]) Kind() MessageKind {
 
 func (message *messageProto[F]) Features() F {
 	return message.features
+}
+
+func (message *messageProto[F]) bind(instance *Peer) {
+	message.peer = instance
+}
+
+func (message *messageProto[F]) Peer() *Peer {
+	return message.peer
 }
 
 type messagePayload interface {
@@ -65,18 +74,24 @@ func (field *messageRouteField[T]) Route() T {
 	return field.route
 }
 
+type Event interface {
+	ID() string
+	Kind() MessageKind
+	bind(*Peer)
+	Peer() *Peer
+}
+
 type AcceptFeatures struct {
 	SourceID string `json:"sourceID"`
 }
 
 type AcceptEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *AcceptFeatures
 }
 
 func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
-	return &messageProto[*AcceptFeatures]{id, MK_ACCEPT, features}
+	return &messageProto[*AcceptFeatures]{id, MK_ACCEPT, features, nil}
 }
 
 func NewAcceptEvent(sourceID string) AcceptEvent {
@@ -97,8 +112,7 @@ type PublishRoute struct {
 }
 
 type PublishEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *PublishFeatures
 	messagePayload
 	Route() *PublishRoute
@@ -116,7 +130,7 @@ func MakePublishEvent(
 		messagePayload
 	}
 	return &message{
-		&messageProto[*PublishFeatures]{id, MK_PUBLISH, features},
+		&messageProto[*PublishFeatures]{id, MK_PUBLISH, features, nil},
 		&messageRouteField[*PublishRoute]{route},
 		data,
 	}
@@ -142,8 +156,7 @@ type CallRoute struct {
 }
 
 type CallEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *CallFeatures
 	messagePayload
 	Route() *CallRoute
@@ -161,7 +174,7 @@ func MakeCallEvent(
 		messagePayload
 	}
 	return &message{
-		&messageProto[*CallFeatures]{id, MK_CALL, features},
+		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
 	}
@@ -182,8 +195,7 @@ type ReplyFeatures struct {
 }
 
 type ReplyEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *ReplyFeatures
 	messagePayload
 }
@@ -198,7 +210,7 @@ func MakeReplyEvent(
 		*messageProto[*ReplyFeatures]
 		messagePayload
 	}
-	return &message{&messageProto[*ReplyFeatures]{id, kind, features}, data}
+	return &message{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
 }
 
 func NewReplyEvent[T any](invocationID string, data T) ReplyEvent {
@@ -235,8 +247,7 @@ type NextFeatures struct {
 }
 
 type NextEvent interface {
-	ID() string
-	Kind() MessageKind
+	Event
 	Features() *NextFeatures
 }
 
@@ -244,7 +255,7 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 	type message struct {
 		*messageProto[*NextFeatures]
 	}
-	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features}}
+	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features, nil}}
 }
 
 func NewNextEvent(generatorID string) NextEvent {
