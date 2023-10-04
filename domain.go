@@ -198,7 +198,6 @@ type ReplyEvent interface {
 	Event
 	Features() *ReplyFeatures
 	Error() error
-	IsGenerator() bool
 	Done() bool
 	messagePayload
 }
@@ -208,12 +207,8 @@ type replyMessage struct {
 	messagePayload
 }
 
-func (message *replyMessage) IsGenerator() bool {
-	return message.Kind() == MK_YIELD
-}
-
 func (message *replyMessage) Done() bool {
-	return !message.IsGenerator()
+	return message.Kind() != MK_YIELD
 }
 
 func (message *replyMessage) Error() error {

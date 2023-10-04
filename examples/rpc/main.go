@@ -20,11 +20,11 @@ type EchoPayload struct {
 func echo(callEvent wamp.CallEvent) wamp.ReplyEvent {
 	payload := new(EchoPayload)
 	callEvent.Payload(payload)
-	replyEvent := wamp.NewReplyEvent(callEvent.ID(), payload)
+	replyEvent := wamp.NewReplyEvent(callEvent, payload)
 	return replyEvent
 }
 
-func main() {
+func createSession() *wamp.Session {
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
 		&wampSerializer.DefaultJSONSerializer,
@@ -32,11 +32,17 @@ func main() {
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
+		return session
 	} else {
 		panic("WAMP Join Error")
 	}
+}
 
-	registration, e := session.Register("example.echo", &wamp.RegisterOptions{}, echo)
+func main() {
+	asession := createSession()
+	bsession := createSession()
+
+	registration, e := asession.Register("example.echo", &wamp.RegisterOptions{}, echo)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
@@ -44,15 +50,13 @@ func main() {
 	}
 
 	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.echo"}, EchoPayload{"Hello, WAMP!"})
-	replyEvent := session.Call(callEvent)
-
-	replyFeatures := replyEvent.Features()
-	if replyFeatures.OK {
+	replyEvent := bsession.Call(callEvent)
+	if replyEvent.Error() == nil {
 		replyPayload := new(EchoPayload)
 		replyEvent.Payload(replyPayload)
 		fmt.Printf("call(example.echo) %s\n", replyPayload)
 	} else {
-		e = wamp.ExtractError(replyEvent)
+		e = replyEvent.Error()
 		fmt.Printf("call(example.echo) %s\n", e)
 	}
 }
