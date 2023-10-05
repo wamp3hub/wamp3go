@@ -257,7 +257,7 @@ func newYieldEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
 		xid.New().String(),
 		MK_YIELD,
-		&ReplyFeatures{ source.ID()},
+		&ReplyFeatures{source.ID()},
 		&messagePayloadField[T]{data},
 	)
 }
@@ -297,6 +297,6 @@ type Subscription = Resource[*SubscribeOptions]
 
 type Registration = Resource[*RegisterOptions]
 
-type publishEndpoint func(PublishEvent)
+type PublishEndpoint func(PublishEvent)
 
-type callEndpoint func(CallEvent) ReplyEvent
+type CallEndpoint func(CallEvent) ReplyEvent
