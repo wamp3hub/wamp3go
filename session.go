@@ -30,7 +30,7 @@ func NewSession(peer *Peer) *Session {
 		make(map[string]CallEndpoint),
 	}
 
-	session.peer.IncomingPublishEvents.Consume(
+	session.peer.ConsumeIncomingPublishEvents(
 		func(publishEvent PublishEvent) {
 			route := publishEvent.Route()
 			endpoint, found := session.Subscriptions[route.EndpointID]
@@ -46,7 +46,7 @@ func NewSession(peer *Peer) *Session {
 		func() {},
 	)
 
-	session.peer.IncomingCallEvents.Consume(
+	session.peer.ConsumeIncomingCallEvents(
 		func(callEvent CallEvent) {
 			route := callEvent.Route()
 			endpoint, found := session.Registrations[route.EndpointID]

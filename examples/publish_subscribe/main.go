@@ -14,7 +14,7 @@ type LoginPayload struct {
 	Password string `json:"password"`
 }
 
-func main() {
+func createSession() *wamp.Session {
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
 		&wampSerializer.DefaultJSONSerializer,
@@ -22,41 +22,43 @@ func main() {
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
-	} else {
-		panic("WAMP Join Error")
+		return session
 	}
 
-	type EchoPayload struct {
-		Message string
-	}
+	panic("WAMP Join Error")
+}
 
+func main() {
 	wg := new(sync.WaitGroup)
-	wg.Add(1)
+	wg.Add(6)
 
-	subscription, e := session.Subscribe(
-		"example.echo",
-		&wamp.SubscribeOptions{},
-		func(publishEvent wamp.PublishEvent) {
-			payload := new(EchoPayload)
-			publishEvent.Payload(payload)
-			fmt.Printf("new message %s\n", payload.Message)
-			wg.Done()
-		},
-	)
-	if e == nil {
-		fmt.Printf("subscription ID=%s\n", subscription.ID)
-	} else {
-		panic("SubscriptionError")
+	onEcho := func(publishEvent wamp.PublishEvent) {
+		var payload string
+		publishEvent.Payload(&payload)
+		fmt.Printf("new message %s\n", payload)
+		wg.Done()
 	}
+
+	asession := createSession()
+	bsession := createSession()
+	csession := createSession()
+	dsession := createSession()
+
+	asession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
+	bsession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
+	csession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
 
 	publishEvent := wamp.NewPublishEvent(
 		&wamp.PublishFeatures{"example.echo", nil, nil},
-		EchoPayload{"Hello, WAMP!"},
+		"Hello, WAMP!",
 	)
-	e = session.Publish(publishEvent)
-	if e == nil {
-		wg.Wait()
-	} else {
-		panic("Something went wrong")
-	}
+	dsession.Publish(publishEvent)
+
+	publishEvent = wamp.NewPublishEvent(
+		&wamp.PublishFeatures{"example.echo", nil, nil},
+		"How are you?",
+	)
+	dsession.Publish(publishEvent)
+
+	wg.Wait()
 }

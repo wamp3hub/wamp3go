@@ -3,52 +3,41 @@ package shared
 type nextFunction[T any] func(T)
 type completeFunction func()
 
-type Listener[T any] struct {
+type Consumer[T any] struct {
 	next     nextFunction[T]
 	complete completeFunction
 }
 
 // TODO unconsume
 
-type ListenerList[T any] []Listener[T]
+type ConsumerList[T any] []Consumer[T]
 
-type Consumer[T any] struct {
-	listeners ListenerList[T]
-}
+type Consumable[T any] func(nextFunction[T], completeFunction) *Consumer[T]
+type Producible[T any] func(T)
+type Closeable func()
 
-// TODO rate limiting
+func NewStream[T any]() (Consumable[T], Producible[T], Closeable) {
+	consumerList := ConsumerList[T]{}
 
-func (c *Consumer[T]) Consume(
-	next nextFunction[T],
-	complete completeFunction,
-) {
-	c.listeners = append(c.listeners, Listener[T]{next, complete})
-}
-
-func (c *Consumer[T]) Close() {
-	for _, subscription := range c.listeners {
-		go subscription.complete()
+	consume := func(next nextFunction[T], complete completeFunction) *Consumer[T] {
+		consumer := Consumer[T]{next, complete}
+		consumerList = append(consumerList, consumer)
+		return &consumer
 	}
-	c.listeners = ListenerList[T]{}
-}
 
-type Producer[T any] struct {
-	consumer *Consumer[T]
-}
-
-func (p *Producer[T]) Produce(data T) {
-	for _, subscription := range p.consumer.listeners {
-		go subscription.next(data)
+	produce := func(v T) {
+		// TODO rate limiting
+		for _, consumer := range consumerList {
+			go consumer.next(v)
+		}
 	}
-}
 
-func (p *Producer[T]) Close() {
-	p.consumer.Close()
-}
+	close := func() {
+		for _, consumer := range consumerList {
+			go consumer.complete()
+		}
+		consumerList = ConsumerList[T]{}
+	}
 
-func NewStream[T any]() (*Producer[T], *Consumer[T]) {
-	listeners := ListenerList[T]{}
-	c := Consumer[T]{listeners}
-	p := Producer[T]{&c}
-	return &p, &c
+	return consume, produce, close
 }

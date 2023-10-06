@@ -6,10 +6,10 @@ import (
 )
 
 func TestHappyPathStream(t *testing.T) {
-	producer, consumer := NewStream[string]()
+	consume, produce, close := NewStream[string]()
 	wg := new(sync.WaitGroup)
 
-	consumer.Consume(
+	consume(
 		func(v string) {
 			println("alpha: ", v)
 			wg.Done()
@@ -19,7 +19,7 @@ func TestHappyPathStream(t *testing.T) {
 			wg.Done()
 		},
 	)
-	consumer.Consume(
+	consume(
 		func(v string) {
 			println("beta: ", v)
 			wg.Done()
@@ -31,11 +31,11 @@ func TestHappyPathStream(t *testing.T) {
 	)
 
 	wg.Add(4)
-	producer.Produce("Hello, world")
-	producer.Produce("Nice")
+	produce("Hello, world")
+	produce("Nice")
 	wg.Wait()
 
 	wg.Add(2)
-	producer.Close()
+	close()
 	wg.Wait()
 }

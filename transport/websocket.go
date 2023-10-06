@@ -77,9 +77,7 @@ func WebsocketJoin(
 	serializer client.Serializer,
 	credentials any,
 ) (*client.Session, error) {
-	payload, e := interview.HTTP2Interview(
-		address, &interview.Payload{credentials},
-	)
+	payload, e := interview.HTTP2Interview(address, &interview.Payload{credentials})
 	if e == nil {
 		transport, e := connectWebsocket(address, payload.Token, serializer)
 		if e == nil {
