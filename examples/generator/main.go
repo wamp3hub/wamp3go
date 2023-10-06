@@ -28,7 +28,7 @@ func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
 func main() {
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
-		&wampSerializer.DefaultJSONSerializer,
+		&wampSerializer.DefaultSerializer,
 		&LoginPayload{"test", "test"},
 	)
 	if e == nil {

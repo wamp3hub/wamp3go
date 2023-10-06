@@ -15,8 +15,8 @@ var (
 
 type Session struct {
 	peer          *Peer
-	Subscriptions map[string]publishEndpoint
-	Registrations map[string]callEndpoint
+	Subscriptions map[string]PublishEndpoint
+	Registrations map[string]CallEndpoint
 }
 
 func (session *Session) ID() string {
@@ -26,11 +26,11 @@ func (session *Session) ID() string {
 func NewSession(peer *Peer) *Session {
 	session := Session{
 		peer,
-		make(map[string]publishEndpoint),
-		make(map[string]callEndpoint),
+		make(map[string]PublishEndpoint),
+		make(map[string]CallEndpoint),
 	}
 
-	session.peer.IncomingPublishEvents.Consume(
+	session.peer.ConsumeIncomingPublishEvents(
 		func(publishEvent PublishEvent) {
 			route := publishEvent.Route()
 			endpoint, found := session.Subscriptions[route.EndpointID]
@@ -46,7 +46,7 @@ func NewSession(peer *Peer) *Session {
 		func() {},
 	)
 
-	session.peer.IncomingCallEvents.Consume(
+	session.peer.ConsumeIncomingCallEvents(
 		func(callEvent CallEvent) {
 			route := callEvent.Route()
 			endpoint, found := session.Registrations[route.EndpointID]
@@ -110,7 +110,7 @@ type NewResourcePayload[O any] struct {
 func (session *Session) Subscribe(
 	uri string,
 	features *SubscribeOptions,
-	endpoint publishEndpoint,
+	endpoint PublishEndpoint,
 ) (*Subscription, error) {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.subscribe"},
@@ -131,7 +131,7 @@ func (session *Session) Subscribe(
 func (session *Session) Register(
 	uri string,
 	features *RegisterOptions,
-	endpoint callEndpoint,
+	endpoint CallEndpoint,
 ) (*Registration, error) {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.register"},

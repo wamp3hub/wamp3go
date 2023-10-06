@@ -22,30 +22,34 @@ type Transport interface {
 }
 
 type Peer struct {
-	ID                    string
-	Transport             Transport
-	PendingAcceptEvents   shared.PendingMap[AcceptEvent]
-	PendingReplyEvents    shared.PendingMap[ReplyEvent]
-	PendingNextEvents     shared.PendingMap[NextEvent]
-	publishEventProducer  *shared.Producer[PublishEvent]
-	IncomingPublishEvents *shared.Consumer[PublishEvent]
-	callEventProducer     *shared.Producer[CallEvent]
-	IncomingCallEvents    *shared.Consumer[CallEvent]
+	ID                           string
+	Transport                    Transport
+	PendingAcceptEvents          shared.PendingMap[AcceptEvent]
+	PendingReplyEvents           shared.PendingMap[ReplyEvent]
+	PendingNextEvents            shared.PendingMap[NextEvent]
+	producePublishEvent         shared.Producible[PublishEvent]
+	ConsumeIncomingPublishEvents shared.Consumable[PublishEvent]
+	closePublishEvents           shared.Closeable
+	produceCallEvent            shared.Producible[CallEvent]
+	ConsumeIncomingCallEvents    shared.Consumable[CallEvent]
+	closeCallEvents              shared.Closeable
 }
 
 func NewPeer(ID string, transport Transport) *Peer {
-	publishEventProducer, publishEventConsumer := shared.NewStream[PublishEvent]()
-	callEventProducer, callEventConsumer := shared.NewStream[CallEvent]()
+	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
+	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
 		shared.NewPendingMap[ReplyEvent](),
 		shared.NewPendingMap[NextEvent](),
-		publishEventProducer,
-		publishEventConsumer,
-		callEventProducer,
-		callEventConsumer,
+		producePublishEvent,
+		consumePublishEvents,
+		closePublishEvents,
+		produceCallEvent,
+		consumeCallEvents,
+		closeCallEvents,
 	}
 }
 
@@ -86,15 +90,16 @@ func (peer *Peer) Consume() {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case PublishEvent:
-			peer.publishEventProducer.Produce(event)
+			peer.producePublishEvent(event)
 			peer.Transport.Send(newAcceptEvent(event))
 		case CallEvent:
-			peer.callEventProducer.Produce(event)
+			peer.produceCallEvent(event)
 			peer.Transport.Send(newAcceptEvent(event))
 		default:
 			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}
 	}
-	peer.publishEventProducer.Close()
-	peer.callEventProducer.Close()
+
+	peer.closePublishEvents()
+	peer.closeCallEvents()
 }
