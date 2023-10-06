@@ -144,4 +144,4 @@ func (JSONSerializer) Decode(v []byte) (event client.Event, e error) {
 	return nil, e
 }
 
-var DefaultJSONSerializer JSONSerializer
+var DefaultSerializer JSONSerializer
