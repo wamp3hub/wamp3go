@@ -3,6 +3,7 @@ package wamp3go
 import (
 	"errors"
 	"log"
+	"sync"
 
 	"github.com/wamp3hub/wamp3go/shared"
 )
@@ -23,14 +24,15 @@ type Transport interface {
 
 type Peer struct {
 	ID                           string
+	writeMutex                   *sync.Mutex
 	Transport                    Transport
 	PendingAcceptEvents          shared.PendingMap[AcceptEvent]
 	PendingReplyEvents           shared.PendingMap[ReplyEvent]
 	PendingNextEvents            shared.PendingMap[NextEvent]
-	producePublishEvent         shared.Producible[PublishEvent]
+	producePublishEvent          shared.Producible[PublishEvent]
 	ConsumeIncomingPublishEvents shared.Consumable[PublishEvent]
 	closePublishEvents           shared.Closeable
-	produceCallEvent            shared.Producible[CallEvent]
+	produceCallEvent             shared.Producible[CallEvent]
 	ConsumeIncomingCallEvents    shared.Consumable[CallEvent]
 	closeCallEvents              shared.Closeable
 }
@@ -40,6 +42,7 @@ func NewPeer(ID string, transport Transport) *Peer {
 	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
+		new(sync.Mutex),
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
 		shared.NewPendingMap[ReplyEvent](),
@@ -55,7 +58,10 @@ func NewPeer(ID string, transport Transport) *Peer {
 
 func (peer *Peer) Send(event Event) error {
 	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	// avoid concurrent write
+	peer.writeMutex.Lock()
 	peer.Transport.Send(event)
+	peer.writeMutex.Unlock()
 	_, done := <-acceptEventPromise
 	if done {
 		return nil

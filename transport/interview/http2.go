@@ -17,6 +17,7 @@ type ErrorPayload struct {
 }
 
 type SuccessPayload struct {
+	RouterID string `json:"routerID"`
 	PeerID string `json:"peerID"`
 	Token  string `json:"token"`
 }

@@ -2,7 +2,6 @@ package transport
 
 import (
 	"log"
-	"sync"
 
 	client "github.com/wamp3hub/wamp3go"
 	interview "github.com/wamp3hub/wamp3go/transport/interview"
@@ -13,22 +12,19 @@ import (
 type wsTransport struct {
 	Serializer client.Serializer
 	Connection *websocket.Conn
-	writeMutex *sync.Mutex
 }
 
 func WSTransport(
 	serializer client.Serializer,
 	connection *websocket.Conn,
 ) client.Transport {
-	return &wsTransport{serializer, connection, new(sync.Mutex)}
+	return &wsTransport{serializer, connection}
 }
 
 func (transport *wsTransport) Send(event client.Event) error {
 	rawMessage, e := transport.Serializer.Encode(event)
 	if e == nil {
-		transport.writeMutex.Lock()
 		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
-		transport.writeMutex.Unlock()
 	} else {
 		log.Printf("[WSTransport] EncodeMessage: %s", e)
 	}
@@ -57,19 +53,18 @@ func (transport *wsTransport) Close() error {
 	return e
 }
 
-func connectWebsocket(
+func WebsocketConnect(
 	address string,
-	token string,
 	serializer client.Serializer,
-) (client.Transport, error) {
-	wsAddress := "ws://" + address + "/wamp3/websocket?token=" + token
-	log.Printf("[websocket] dial %s", wsAddress)
-	connection, response, e := websocket.DefaultDialer.Dial(wsAddress, nil)
+) (string, client.Transport, error) {
+	log.Printf("[websocket] dial %s", address)
+	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
-		return WSTransport(serializer, connection), nil
+		routerID := response.Header.Get("X-WAMP-RouterID")
+		return routerID, WSTransport(serializer, connection), nil
 	}
 	log.Printf("[websocket] %s connect %s", response.Status, e)
-	return nil, e
+	return "", nil, e
 }
 
 func WebsocketJoin(
@@ -79,7 +74,8 @@ func WebsocketJoin(
 ) (*client.Session, error) {
 	payload, e := interview.HTTP2Interview(address, &interview.Payload{credentials})
 	if e == nil {
-		transport, e := connectWebsocket(address, payload.Token, serializer)
+		wsAddress := "ws://" + address + "/wamp3/websocket?token=" + payload.Token
+		_, transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
 			peer := client.NewPeer(payload.PeerID, transport)
 			go peer.Consume()
