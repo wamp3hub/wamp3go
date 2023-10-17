@@ -77,8 +77,7 @@ func WebsocketJoin(
 		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
 		_, transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
-			peer := client.NewPeer(payload.YourID, transport)
-			go peer.Consume()
+			peer := client.SpawnPeer(payload.YourID, transport)
 			session := client.NewSession(peer)
 			return session, nil
 		}

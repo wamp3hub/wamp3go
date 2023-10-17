@@ -37,6 +37,24 @@ type Peer struct {
 	closeCallEvents              shared.Closeable
 }
 
+func (peer *Peer) Send(event Event) error {
+	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	// avoid concurrent write
+	peer.writeMutex.Lock()
+	peer.Transport.Send(event)
+	peer.writeMutex.Unlock()
+	_, done := <-acceptEventPromise
+	if done {
+		return nil
+	}
+	return errors.New("TimedOut")
+}
+
+func (peer *Peer) Close() error {
+	e := peer.Transport.Close()
+	return e
+}
+
 func NewPeer(ID string, transport Transport) *Peer {
 	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
 	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
@@ -56,22 +74,12 @@ func NewPeer(ID string, transport Transport) *Peer {
 	}
 }
 
-func (peer *Peer) Send(event Event) error {
-	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	// avoid concurrent write
-	peer.writeMutex.Lock()
-	peer.Transport.Send(event)
-	peer.writeMutex.Unlock()
-	_, done := <-acceptEventPromise
-	if done {
-		return nil
-	}
-	return errors.New("TimedOut")
-}
-
-func (peer *Peer) Consume() {
+func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 	q := make(QEvent, 128)
 	go peer.Transport.Receive(q)
+
+	wg.Done()
+
 	for event := range q {
 		event.bind(peer)
 
@@ -108,4 +116,15 @@ func (peer *Peer) Consume() {
 
 	peer.closePublishEvents()
 	peer.closeCallEvents()
+}
+
+func SpawnPeer(ID string, transport Transport) *Peer {
+	peer := NewPeer(ID, transport)
+
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
+	go listenEvents(wg, peer)
+	wg.Wait()
+
+	return peer
 }
