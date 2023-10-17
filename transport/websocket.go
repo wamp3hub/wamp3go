@@ -74,10 +74,10 @@ func WebsocketJoin(
 ) (*client.Session, error) {
 	payload, e := interview.HTTP2Interview(address, &interview.Payload{credentials})
 	if e == nil {
-		wsAddress := "ws://" + address + "/wamp3/websocket?token=" + payload.Token
+		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
 		_, transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
-			peer := client.NewPeer(payload.PeerID, transport)
+			peer := client.NewPeer(payload.YourID, transport)
 			go peer.Consume()
 			session := client.NewSession(peer)
 			return session, nil

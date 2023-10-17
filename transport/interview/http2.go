@@ -18,8 +18,8 @@ type ErrorPayload struct {
 
 type SuccessPayload struct {
 	RouterID string `json:"routerID"`
-	PeerID string `json:"peerID"`
-	Token  string `json:"token"`
+	YourID   string `json:"yourID"`
+	Ticket   string `json:"ticket"`
 }
 
 func HTTP2Interview(address string, requestPayload *Payload) (*SuccessPayload, error) {

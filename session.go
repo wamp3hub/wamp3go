@@ -114,7 +114,7 @@ func (session *Session) Subscribe(
 ) (*Subscription, error) {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.subscribe"},
-		&NewResourcePayload[SubscribeOptions]{uri, features},
+		NewResourcePayload[SubscribeOptions]{uri, features},
 	)
 	replyEvent := session.Call(callEvent)
 	if replyEvent.Error() == nil {
@@ -135,7 +135,7 @@ func (session *Session) Register(
 ) (*Registration, error) {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.register"},
-		&NewResourcePayload[RegisterOptions]{uri, features},
+		NewResourcePayload[RegisterOptions]{uri, features},
 	)
 	replyEvent := session.Call(callEvent)
 	if replyEvent.Error() == nil {
@@ -156,7 +156,7 @@ type DeleteResourcePayload struct {
 func (session *Session) Unsubscribe(subscriptionID string) error {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.unsubscribe"},
-		&DeleteResourcePayload{subscriptionID},
+		DeleteResourcePayload{subscriptionID},
 	)
 	replyEvent := session.Call(callEvent)
 	if replyEvent.Error() == nil {
@@ -168,7 +168,7 @@ func (session *Session) Unsubscribe(subscriptionID string) error {
 func (session *Session) Unregister(registrationID string) error {
 	callEvent := NewCallEvent(
 		&CallFeatures{"wamp.unregister"},
-		&DeleteResourcePayload{registrationID},
+		DeleteResourcePayload{registrationID},
 	)
 	replyEvent := session.Call(callEvent)
 	if replyEvent.Error() == nil {
