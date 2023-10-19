@@ -81,7 +81,7 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 	wg.Done()
 
 	for event := range q {
-		event.bind(peer)
+		event.setPeer(peer)
 
 		switch event := event.(type) {
 		case AcceptEvent:

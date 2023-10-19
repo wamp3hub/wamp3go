@@ -19,10 +19,10 @@ const (
 )
 
 type messageProto[F any] struct {
-	id       string
-	kind     MessageKind
-	features F
-	peer     *Peer
+	id        string
+	kind      MessageKind
+	features  F
+	peer      *Peer
 }
 
 func (message *messageProto[F]) ID() string {
@@ -37,11 +37,11 @@ func (message *messageProto[F]) Features() F {
 	return message.features
 }
 
-func (message *messageProto[F]) bind(instance *Peer) {
+func (message *messageProto[F]) setPeer(instance *Peer) {
 	message.peer = instance
 }
 
-func (message *messageProto[F]) Peer() *Peer {
+func (message *messageProto[F]) getPeer() *Peer {
 	return message.peer
 }
 
@@ -78,8 +78,8 @@ func (field *messageRouteField[T]) Route() T {
 type Event interface {
 	ID() string
 	Kind() MessageKind
-	bind(*Peer)
-	Peer() *Peer
+	setPeer(*Peer)
+	getPeer() *Peer
 }
 
 type AcceptFeatures struct {
@@ -161,6 +161,23 @@ type CallEvent interface {
 	Features() *CallFeatures
 	messagePayload
 	Route() *CallRoute
+	setNextYield(ReplyEvent)
+	getNextYield() ReplyEvent
+}
+
+type callMessage struct {
+	*messageProto[*CallFeatures]
+	*messageRouteField[*CallRoute]
+	messagePayload
+	nextYield ReplyEvent
+}
+
+func (message *callMessage) setNextYield(instance ReplyEvent) {
+	message.nextYield = instance
+}
+
+func (message *callMessage) getNextYield() ReplyEvent {
+	return message.nextYield
 }
 
 func MakeCallEvent(
@@ -169,15 +186,11 @@ func MakeCallEvent(
 	data messagePayload,
 	route *CallRoute,
 ) CallEvent {
-	type message struct {
-		*messageProto[*CallFeatures]
-		*messageRouteField[*CallRoute]
-		messagePayload
-	}
-	return &message{
+	return &callMessage{
 		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
+		nil,
 	}
 }
 
@@ -200,11 +213,14 @@ type ReplyEvent interface {
 	Error() error
 	Done() bool
 	messagePayload
+	setLastYield(ReplyEvent)
+	getLastYield() ReplyEvent
 }
 
 type replyMessage struct {
 	*messageProto[*ReplyFeatures]
 	messagePayload
+	lastYield ReplyEvent
 }
 
 func (message *replyMessage) Done() bool {
@@ -216,12 +232,20 @@ func (message *replyMessage) Error() error {
 		return nil
 	}
 
-	payload := new(ErrorEventPayload)
+	payload := new(errorEventPayload)
 	e := message.Payload(payload)
 	if e == nil {
 		return errors.New(payload.Code)
 	}
 	return e
+}
+
+func (message *replyMessage) setLastYield(instance ReplyEvent) {
+	message.lastYield = instance
+}
+
+func (message *replyMessage) getLastYield() ReplyEvent {
+	return message.lastYield
 }
 
 func MakeReplyEvent(
@@ -230,7 +254,7 @@ func MakeReplyEvent(
 	features *ReplyFeatures,
 	data messagePayload,
 ) ReplyEvent {
-	return &replyMessage{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
+	return &replyMessage{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data, nil}
 }
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {
@@ -242,14 +266,14 @@ func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 	)
 }
 
-type ErrorEventPayload struct {
+type errorEventPayload struct {
 	Code string `json:"code"`
 }
 
 func NewErrorEvent(source Event, e error) ReplyEvent {
 	errorMessage := e.Error()
-	payload := ErrorEventPayload{errorMessage}
-	data := messagePayloadField[ErrorEventPayload]{payload}
+	payload := errorEventPayload{errorMessage}
+	data := messagePayloadField[errorEventPayload]{payload}
 	return MakeReplyEvent(xid.New().String(), MK_ERROR, &ReplyFeatures{source.ID()}, &data)
 }
 
