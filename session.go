@@ -1,8 +1,11 @@
 package wamp3go
 
 import (
+	"errors"
 	"log"
 	"time"
+
+	"github.com/wamp3hub/wamp3go/shared"
 )
 
 const DEFAULT_TIMEOUT = time.Minute
@@ -50,8 +53,8 @@ func NewSession(peer *Peer) *Session {
 
 				nextYieldEvent := callEvent.getNextYield()
 				if nextYieldEvent != nil {
-					nextEventPromise := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-					e := session.peer.Send(nextYieldEvent)
+					nextEventPromise, _ := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
+					e := session.peer.Say(nextYieldEvent)
 					if e == nil {
 						nextEvent, done := <-nextEventPromise
 						if done {
@@ -60,7 +63,7 @@ func NewSession(peer *Peer) *Session {
 					}
 				}
 
-				e := session.peer.Send(replyEvent)
+				e := session.peer.Say(replyEvent)
 				if e == nil {
 					log.Printf("[session] success call (ID=%s)", session.ID())
 				} else {
@@ -79,98 +82,128 @@ func NewSession(peer *Peer) *Session {
 	return &session
 }
 
-func (session *Session) Publish(event PublishEvent) error {
-	return session.peer.Send(event)
+func Publish(
+	session *Session,
+	event PublishEvent,
+) error {
+	return session.peer.Say(event)
 }
 
-func (session *Session) Call(event CallEvent) ReplyEvent {
-	replyEventPromise := session.peer.PendingReplyEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	e := session.peer.Send(event)
+type pendingResult[T any] struct {
+	promise       shared.Promise[ReplyEvent]
+	cancelPromise func()
+	callbackList  []func(ReplyEvent)
+}
+
+func newPendingResult[T any](
+	promise shared.Promise[ReplyEvent],
+	cancel func(),
+) *pendingResult[T] {
+	return &pendingResult[T]{promise, cancel, []func(ReplyEvent){}}
+}
+
+func (pending *pendingResult[T]) addCallback(f func(ReplyEvent)) {
+	pending.callbackList = append(pending.callbackList, f)
+}
+
+func (pending *pendingResult[T]) Cancel() {
+	pending.cancelPromise()
+}
+
+func (pending *pendingResult[T]) Await() (replyEvent ReplyEvent, outPayload T, e error) {
+	replyEvent, done := <-pending.promise
+
+	for _, callback := range pending.callbackList {
+		callback(replyEvent)
+	}
+
+	if done {
+		if replyEvent.Kind() == MK_ERROR {
+			replyEvent.Payload(e)
+		} else {
+			e = replyEvent.Payload(&outPayload)
+		}
+	} else {
+		e = errors.New("TimedOut")
+	}
+	return replyEvent, outPayload, e
+}
+
+func Call[O, I any](
+	session *Session,
+	features *CallFeatures,
+	payload I,
+) *pendingResult[O] {
+	callEvent := NewCallEvent[I](features, payload)
+	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(callEvent.ID(), DEFAULT_TIMEOUT)
+	e := session.peer.Say(callEvent)
 	if e == nil {
-		replyEvent, done := <-replyEventPromise
-		if done {
-			return replyEvent
-		}
+		// TODO cancellation
+		return newPendingResult[O](replyEventPromise, cancelPromise)
 	}
-	return NewErrorEvent(event, e)
+	// TODO
+	return nil
 }
 
-type NewResourcePayload[O any] struct {
-	URI     string
-	Options *O
+type generator[T any] struct {
+	peer   *Peer
+	nextID string
+	done   bool
 }
 
-func (session *Session) Subscribe(
-	uri string,
-	features *SubscribeOptions,
-	endpoint PublishEndpoint,
-) (*Subscription, error) {
-	callEvent := NewCallEvent(
-		&CallFeatures{"wamp.subscribe"},
-		NewResourcePayload[SubscribeOptions]{uri, features},
-	)
-	replyEvent := session.Call(callEvent)
-	if replyEvent.Error() == nil {
-		subscription := new(Subscription)
-		e := replyEvent.Payload(subscription)
-		if e == nil {
-			session.Subscriptions[subscription.ID] = endpoint
-			return subscription, nil
-		}
+func (g *generator[T]) Done() bool {
+	return g.done
+}
+
+func (g *generator[T]) onYield(response ReplyEvent) {
+	if response.Kind() == MK_YIELD {
+		g.nextID = response.ID()
+	} else {
+		g.done = true
 	}
-	return nil, replyEvent.Error()
 }
 
-func (session *Session) Register(
-	uri string,
-	features *RegisterOptions,
-	endpoint CallEndpoint,
-) (*Registration, error) {
-	callEvent := NewCallEvent(
-		&CallFeatures{"wamp.register"},
-		NewResourcePayload[RegisterOptions]{uri, features},
-	)
-	replyEvent := session.Call(callEvent)
-	if replyEvent.Error() == nil {
-		registration := new(Registration)
-		e := replyEvent.Payload(registration)
-		if e == nil {
-			session.Registrations[registration.ID] = endpoint
-			return registration, nil
-		}
+func (g *generator[T]) Next(timeout time.Duration) *pendingResult[T] {
+	nextEvent := newNextEvent(g.nextID)
+	replyEventPromise, cancelPromise := g.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
+	e := g.peer.Say(nextEvent)
+	if e == nil {
+		// TODO cancellation
+		pending := newPendingResult[T](replyEventPromise, cancelPromise)
+		pending.addCallback(g.onYield)
+		return pending
 	}
-	return nil, replyEvent.Error()
+	// TODO
+	return nil
 }
 
-type DeleteResourcePayload struct {
-	ID string
+func (g *generator[T]) Stop() error {
+	g.done = true
+	// TODO cancellation
+	return nil
 }
 
-func (session *Session) Unsubscribe(subscriptionID string) error {
-	callEvent := NewCallEvent(
-		&CallFeatures{"wamp.unsubscribe"},
-		DeleteResourcePayload{subscriptionID},
-	)
-	replyEvent := session.Call(callEvent)
-	if replyEvent.Error() == nil {
-		return nil
+func NewGenerator[O, I any](
+	session *Session,
+	callFeatures *CallFeatures,
+	payload I,
+) (*generator[O], error) {
+	result := Call[struct{}](session, callFeatures, payload)
+	yieldEvent, _, e := result.Await()
+
+	if yieldEvent.Kind() != MK_YIELD {
+		return nil, errors.New("ProcedureMustBeGenerator")
 	}
-	return replyEvent.Error()
-}
 
-func (session *Session) Unregister(registrationID string) error {
-	callEvent := NewCallEvent(
-		&CallFeatures{"wamp.unregister"},
-		DeleteResourcePayload{registrationID},
-	)
-	replyEvent := session.Call(callEvent)
-	if replyEvent.Error() == nil {
-		return nil
+	if e == nil {
+		g := generator[O]{session.peer, yieldEvent.ID(), false}
+		return &g, nil
 	}
-	return replyEvent.Error()
+
+	return nil, e
 }
 
-func Yield(callEvent CallEvent, payload any) (error) {
+func Yield[I any](callEvent CallEvent, payload I) error {
 	nextYieldEvent := callEvent.getNextYield()
 	if nextYieldEvent == nil {
 		nextYieldEvent = newYieldEvent(callEvent, struct{}{})
@@ -179,8 +212,8 @@ func Yield(callEvent CallEvent, payload any) (error) {
 	}
 
 	peer := callEvent.getPeer()
-	nextEventPromise := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-	e := peer.Send(nextYieldEvent)
+	nextEventPromise, _ := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
+	e := peer.Say(nextYieldEvent)
 	if e == nil {
 		nextEvent, done := <-nextEventPromise
 		if done {
@@ -188,34 +221,71 @@ func Yield(callEvent CallEvent, payload any) (error) {
 			callEvent.setNextYield(nextYieldEvent)
 		}
 	}
+
 	return e
 }
 
-func Next(generator ReplyEvent, timeout time.Duration) ReplyEvent {
-	if generator.Kind() != MK_YIELD {
-		panic("FirstArgumentMustBeGenerator")
-	}
+type NewResourcePayload[O any] struct {
+	URI     string
+	Options *O
+}
 
-	lastYieldEvent := generator.getLastYield()
-
-	lastID := ""
-	if lastYieldEvent == nil {
-		lastID = generator.ID()
-	} else {
-		lastID = lastYieldEvent.ID()
-	}
-
-	peer := generator.getPeer()
-	nextEvent := newNextEvent(lastID)
-	replyEventPromise := peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
-	e := peer.Send(nextEvent)
+func Subscribe(
+	session *Session,
+	uri string,
+	features *SubscribeOptions,
+	endpoint PublishEndpoint,
+) (*Subscription, error) {
+	result := Call[Subscription](
+		session,
+		&CallFeatures{"wamp.subscribe"},
+		NewResourcePayload[SubscribeOptions]{uri, features},
+	)
+	_, subscription, e := result.Await()
 	if e == nil {
-		response, done := <-replyEventPromise
-		if done {
-			generator.setLastYield(response)
-			return response
-		}
+		session.Subscriptions[subscription.ID] = endpoint
+		return &subscription, nil
 	}
+	return nil, e
+}
 
-	return NewErrorEvent(nextEvent, e)
+func Register(
+	session *Session,
+	uri string,
+	features *RegisterOptions,
+	endpoint CallEndpoint,
+) (*Registration, error) {
+	result := Call[Registration](
+		session,
+		&CallFeatures{"wamp.register"},
+		NewResourcePayload[RegisterOptions]{uri, features},
+	)
+	_, registration, e := result.Await()
+	if e == nil {
+		session.Registrations[registration.ID] = endpoint
+		return &registration, nil
+	}
+	return nil, e
+}
+
+type DeleteResourcePayload struct {
+	ID string
+}
+
+func Unsubscribe(
+	session *Session,
+	subscriptionID string,
+) error {
+	result := Call[any](session, &CallFeatures{"wamp.unsubscribe"}, DeleteResourcePayload{subscriptionID})
+	_, _, e := result.Await()
+	return e
+}
+
+func Unregister(
+	session *Session,
+	registrationID string,
+) error {
+	result := Call[any](session, &CallFeatures{"wamp.unregister"}, DeleteResourcePayload{registrationID})
+	_, _, e := result.Await()
+	return e
 }

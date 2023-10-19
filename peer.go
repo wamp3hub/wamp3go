@@ -37,12 +37,17 @@ type Peer struct {
 	closeCallEvents              shared.Closeable
 }
 
-func (peer *Peer) Send(event Event) error {
-	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+func (peer *Peer) send(event Event) error {
 	// avoid concurrent write
 	peer.writeMutex.Lock()
-	peer.Transport.Send(event)
+	e := peer.Transport.Send(event)
 	peer.writeMutex.Unlock()
+	return e
+}
+
+func (peer *Peer) Say(event Event) error {
+	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	peer.send(event)
 	_, done := <-acceptEventPromise
 	if done {
 		return nil
@@ -91,7 +96,7 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 			features := event.Features()
 			e := peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				peer.Transport.Send(newAcceptEvent(event))
+				peer.send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
@@ -99,16 +104,16 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 			features := event.Features()
 			e := peer.PendingNextEvents.Complete(features.YieldID, event)
 			if e == nil {
-				peer.Transport.Send(newAcceptEvent(event))
+				peer.send(newAcceptEvent(event))
 			} else {
 				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
 			}
 		case PublishEvent:
 			peer.producePublishEvent(event)
-			peer.Transport.Send(newAcceptEvent(event))
+			peer.send(newAcceptEvent(event))
 		case CallEvent:
 			peer.produceCallEvent(event)
-			peer.Transport.Send(newAcceptEvent(event))
+			peer.send(newAcceptEvent(event))
 		default:
 			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
 		}

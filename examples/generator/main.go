@@ -14,18 +14,22 @@ type LoginPayload struct {
 }
 
 func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
-	var n int
+	n := 0
 	e := callEvent.Payload(&n)
 	if e == nil {
 		for i := n; i > 0; i-- {
-			wamp.Yield(callEvent, i)
+			e = wamp.Yield(callEvent, i)
+			if e != nil {
+				fmt.Printf("YieldError %s", e)
+				break
+			}
 		}
 		return wamp.NewReplyEvent(callEvent, 0)
 	}
 	return wamp.NewErrorEvent(callEvent, e)
 }
 
-func main() {
+func createSession() *wamp.Session {
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
 		&wampSerializer.DefaultSerializer,
@@ -33,33 +37,37 @@ func main() {
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
+		return session
 	} else {
 		panic("WAMP Join Error")
 	}
+}
 
-	registration, e := session.Register("example.reverse", &wamp.RegisterOptions{}, reverse)
+func main() {
+	asession := createSession()
+	registration, e := wamp.Register(asession, "example.reverse", &wamp.RegisterOptions{}, reverse)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}
 
-	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.reverse"}, 99)
-	generator := session.Call(callEvent)
-
-	var v int
-	for {
-		yieldEvent := wamp.Next(generator, wamp.DEFAULT_TIMEOUT)
-		e := yieldEvent.Error()
-		if e != nil {
-			fmt.Printf("error(example.reversed): %s\n", e)
-			break
-		} else if yieldEvent.Done() {
-			fmt.Print("generator done\n")
-			break
+	bsession := createSession()
+	generator, e := wamp.NewGenerator[int](bsession, &wamp.CallFeatures{"example.reverse"}, 99)
+	if e == nil {
+		fmt.Printf("reverse generator created\n")
+	} else {
+		panic("failed to create generator")
+	}
+	for !generator.Done() {
+		fmt.Print("call(example.reversed): ")
+		result := generator.Next(wamp.DEFAULT_TIMEOUT)
+		_, v, e := result.Await()
+		if e == nil {
+			fmt.Printf("%d\n", v)
 		} else {
-			yieldEvent.Payload(&v)
-			fmt.Printf("call(example.reversed): %d\n", v)
+			fmt.Printf("error %s\n", e)
 		}
 	}
+	fmt.Print("generator done\n")
 }

@@ -44,21 +44,21 @@ func main() {
 	csession := createSession()
 	dsession := createSession()
 
-	asession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
-	bsession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
-	csession.Subscribe("example.echo", &wamp.SubscribeOptions{}, onEcho)
+	wamp.Subscribe(asession, "example.echo", &wamp.SubscribeOptions{}, onEcho)
+	wamp.Subscribe(bsession, "example.echo", &wamp.SubscribeOptions{}, onEcho)
+	wamp.Subscribe(csession, "example.echo", &wamp.SubscribeOptions{}, onEcho)
 
 	publishEvent := wamp.NewPublishEvent(
 		&wamp.PublishFeatures{"example.echo", nil, nil},
 		"Hello, WAMP!",
 	)
-	dsession.Publish(publishEvent)
+	wamp.Publish(dsession, publishEvent)
 
 	publishEvent = wamp.NewPublishEvent(
 		&wamp.PublishFeatures{"example.echo", nil, nil},
 		"How are you?",
 	)
-	dsession.Publish(publishEvent)
+	wamp.Publish(dsession, publishEvent)
 
 	wg.Wait()
 }

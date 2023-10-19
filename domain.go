@@ -210,42 +210,7 @@ type ReplyFeatures struct {
 type ReplyEvent interface {
 	Event
 	Features() *ReplyFeatures
-	Error() error
-	Done() bool
 	messagePayload
-	setLastYield(ReplyEvent)
-	getLastYield() ReplyEvent
-}
-
-type replyMessage struct {
-	*messageProto[*ReplyFeatures]
-	messagePayload
-	lastYield ReplyEvent
-}
-
-func (message *replyMessage) Done() bool {
-	return message.Kind() != MK_YIELD
-}
-
-func (message *replyMessage) Error() error {
-	if message.Kind() != MK_ERROR {
-		return nil
-	}
-
-	payload := new(errorEventPayload)
-	e := message.Payload(payload)
-	if e == nil {
-		return errors.New(payload.Code)
-	}
-	return e
-}
-
-func (message *replyMessage) setLastYield(instance ReplyEvent) {
-	message.lastYield = instance
-}
-
-func (message *replyMessage) getLastYield() ReplyEvent {
-	return message.lastYield
 }
 
 func MakeReplyEvent(
@@ -254,7 +219,11 @@ func MakeReplyEvent(
 	features *ReplyFeatures,
 	data messagePayload,
 ) ReplyEvent {
-	return &replyMessage{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data, nil}
+	type message struct {
+		*messageProto[*ReplyFeatures]
+		messagePayload
+	}
+	return &message{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
 }
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {

@@ -29,7 +29,7 @@ func TestHappyPathPendingMap(t *testing.T) {
 	instance := make(PendingMap[bool])
 
 	for _, key := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"} {
-		promise := instance.New(key, 60*time.Second)
+		promise, _ := instance.New(key, 60*time.Second)
 		go instance.Complete(key, true)
 		v, ok := <-promise
 		if ok && v == true {
