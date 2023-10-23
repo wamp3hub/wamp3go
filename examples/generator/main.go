@@ -8,11 +8,6 @@ import (
 	wampTransport "github.com/wamp3hub/wamp3go/transport"
 )
 
-type LoginPayload struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
 func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
 	n := 0
 	e := callEvent.Payload(&n)
@@ -29,7 +24,12 @@ func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
 	return wamp.NewErrorEvent(callEvent, e)
 }
 
-func createSession() *wamp.Session {
+func main() {
+	type LoginPayload struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
 		&wampSerializer.DefaultSerializer,
@@ -37,23 +37,18 @@ func createSession() *wamp.Session {
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
-		return session
 	} else {
 		panic("WAMP Join Error")
 	}
-}
 
-func main() {
-	asession := createSession()
-	registration, e := wamp.Register(asession, "example.reverse", &wamp.RegisterOptions{}, reverse)
+	registration, e := wamp.Register(session, "example.reverse", &wamp.RegisterOptions{}, reverse)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}
 
-	bsession := createSession()
-	generator, e := wamp.NewGenerator[int](bsession, &wamp.CallFeatures{"example.reverse"}, 99)
+	generator, e := wamp.NewGenerator[int](session, &wamp.CallFeatures{"example.reverse"}, 99)
 	if e == nil {
 		fmt.Printf("reverse generator created\n")
 	} else {

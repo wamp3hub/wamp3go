@@ -82,35 +82,38 @@ func NewSession(peer *Peer) *Session {
 	return &session
 }
 
-func Publish(
+func Publish[I any](
 	session *Session,
-	event PublishEvent,
+	features *PublishFeatures,
+	payload I,
 ) error {
-	return session.peer.Say(event)
+	publishEvent := NewPublishEvent(features, payload)
+	e := session.peer.Say(publishEvent)
+	return e
 }
 
-type pendingResult[T any] struct {
+type PendingResult[T any] struct {
 	promise       shared.Promise[ReplyEvent]
-	cancelPromise func()
+	cancelPromise shared.Cancellable
 	callbackList  []func(ReplyEvent)
 }
 
-func newPendingResult[T any](
+func NewPendingResult[T any](
 	promise shared.Promise[ReplyEvent],
-	cancel func(),
-) *pendingResult[T] {
-	return &pendingResult[T]{promise, cancel, []func(ReplyEvent){}}
+	cancelPromise shared.Cancellable,
+) *PendingResult[T] {
+	return &PendingResult[T]{promise, cancelPromise, []func(ReplyEvent){}}
 }
 
-func (pending *pendingResult[T]) addCallback(f func(ReplyEvent)) {
+func (pending *PendingResult[T]) addCallback(f func(ReplyEvent)) {
 	pending.callbackList = append(pending.callbackList, f)
 }
 
-func (pending *pendingResult[T]) Cancel() {
+func (pending *PendingResult[T]) Cancel() {
 	pending.cancelPromise()
 }
 
-func (pending *pendingResult[T]) Await() (replyEvent ReplyEvent, outPayload T, e error) {
+func (pending *PendingResult[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
 	replyEvent, done := <-pending.promise
 
 	for _, callback := range pending.callbackList {
@@ -121,34 +124,34 @@ func (pending *pendingResult[T]) Await() (replyEvent ReplyEvent, outPayload T, e
 		if replyEvent.Kind() == MK_ERROR {
 			replyEvent.Payload(e)
 		} else {
-			e = replyEvent.Payload(&outPayload)
+			e = replyEvent.Payload(&payload)
 		}
 	} else {
-		e = errors.New("TimedOut")
+		e = errors.New("InternalException")
 	}
-	return replyEvent, outPayload, e
+	return replyEvent, payload, e
 }
 
 func Call[O, I any](
 	session *Session,
 	features *CallFeatures,
 	payload I,
-) *pendingResult[O] {
+) *PendingResult[O] {
 	callEvent := NewCallEvent[I](features, payload)
+	// TODO cancellation
 	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(callEvent.ID(), DEFAULT_TIMEOUT)
+	pendingResult := NewPendingResult[O](replyEventPromise, cancelPromise)
 	e := session.peer.Say(callEvent)
-	if e == nil {
-		// TODO cancellation
-		return newPendingResult[O](replyEventPromise, cancelPromise)
+	if e != nil {
+		pendingResult.Cancel()
 	}
-	// TODO
-	return nil
+	return pendingResult
 }
 
 type generator[T any] struct {
-	peer   *Peer
-	nextID string
 	done   bool
+	nextID string
+	peer   *Peer
 }
 
 func (g *generator[T]) Done() bool {
@@ -163,18 +166,17 @@ func (g *generator[T]) onYield(response ReplyEvent) {
 	}
 }
 
-func (g *generator[T]) Next(timeout time.Duration) *pendingResult[T] {
+func (g *generator[T]) Next(timeout time.Duration) *PendingResult[T] {
 	nextEvent := newNextEvent(g.nextID)
+	// TODO cancellation
 	replyEventPromise, cancelPromise := g.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
+	pendingResult := NewPendingResult[T](replyEventPromise, cancelPromise)
+	pendingResult.addCallback(g.onYield)
 	e := g.peer.Say(nextEvent)
-	if e == nil {
-		// TODO cancellation
-		pending := newPendingResult[T](replyEventPromise, cancelPromise)
-		pending.addCallback(g.onYield)
-		return pending
+	if e != nil {
+		pendingResult.Cancel()
 	}
-	// TODO
-	return nil
+	return pendingResult
 }
 
 func (g *generator[T]) Stop() error {
@@ -192,11 +194,11 @@ func NewGenerator[O, I any](
 	yieldEvent, _, e := result.Await()
 
 	if yieldEvent.Kind() != MK_YIELD {
-		return nil, errors.New("ProcedureMustBeGenerator")
+		e = errors.New("ProcedureIsNotGenerator")
 	}
 
 	if e == nil {
-		g := generator[O]{session.peer, yieldEvent.ID(), false}
+		g := generator[O]{false, yieldEvent.ID(), session.peer}
 		return &g, nil
 	}
 
@@ -288,4 +290,12 @@ func Unregister(
 	result := Call[any](session, &CallFeatures{"wamp.unregister"}, DeleteResourcePayload{registrationID})
 	_, _, e := result.Await()
 	return e
+}
+
+func Leave(
+	session *Session,
+	reason string,
+) error {
+	// TODO
+	return nil
 }
