@@ -8,6 +8,8 @@ import (
 	"github.com/wamp3hub/wamp3go/shared"
 )
 
+const DEFAULT_QSIZE = 128
+
 type QEvent chan Event
 
 type Serializer interface {
@@ -23,7 +25,9 @@ type Transport interface {
 }
 
 type Peer struct {
+	qSize                        int
 	ID                           string
+	Alive                        chan struct{}
 	writeMutex                   *sync.Mutex
 	Transport                    Transport
 	PendingAcceptEvents          shared.PendingMap[AcceptEvent]
@@ -66,11 +70,17 @@ func (peer *Peer) Close() error {
 	return e
 }
 
-func NewPeer(ID string, transport Transport) *Peer {
+func NewPeer(
+	ID string,
+	transport Transport,
+	qSize int,
+) *Peer {
 	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
 	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
 	return &Peer{
+		qSize,
 		ID,
+		make(chan struct{}),
 		new(sync.Mutex),
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
@@ -86,11 +96,12 @@ func NewPeer(ID string, transport Transport) *Peer {
 }
 
 func listenEvents(wg *sync.WaitGroup, peer *Peer) {
-	q := make(QEvent, 128)
+	q := make(QEvent, peer.qSize)
 	go peer.Transport.Receive(q)
 	// transport must send first empty event
 	<-q
 	wg.Done()
+
 	for event := range q {
 		event.setPeer(peer)
 
@@ -128,10 +139,12 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 
 	peer.closePublishEvents()
 	peer.closeCallEvents()
+
+	close(peer.Alive)
 }
 
 func SpawnPeer(ID string, transport Transport) *Peer {
-	peer := NewPeer(ID, transport)
+	peer := NewPeer(ID, transport, DEFAULT_QSIZE)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
