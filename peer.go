@@ -45,7 +45,7 @@ func (peer *Peer) send(event Event) error {
 	return e
 }
 
-func (peer *Peer) sendAccept(source Event) error {
+func (peer *Peer) acknowledge(source Event) error {
 	acceptEvent := newAcceptEvent(source)
 	e := peer.send(acceptEvent)
 	return e
@@ -103,20 +103,20 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 			features := event.Features()
 			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				e = peer.sendAccept(event)
+				e = peer.acknowledge(event)
 			}
 		case NextEvent:
 			features := event.Features()
 			e = peer.PendingNextEvents.Complete(features.YieldID, event)
 			if e == nil {
-				e = peer.sendAccept(event)
+				e = peer.acknowledge(event)
 			}
 		case PublishEvent:
 			peer.producePublishEvent(event)
-			e = peer.sendAccept(event)
+			e = peer.acknowledge(event)
 		case CallEvent:
 			peer.produceCallEvent(event)
-			e = peer.sendAccept(event)
+			e = peer.acknowledge(event)
 		}
 
 		if e == nil {
