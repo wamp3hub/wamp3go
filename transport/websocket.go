@@ -32,6 +32,7 @@ func (transport *wsTransport) Send(event client.Event) error {
 }
 
 func (transport *wsTransport) Receive(q client.QEvent) {
+	q <- nil
 	for {
 		WSMessageType, rawMessage, e := transport.Connection.ReadMessage()
 		if e != nil {
@@ -72,7 +73,7 @@ func WebsocketJoin(
 	serializer client.Serializer,
 	credentials any,
 ) (*client.Session, error) {
-	payload, e := interview.HTTP2Interview(address, &interview.Payload{credentials})
+	payload, e := interview.HTTP2Interview(address, &interview.Payload{Credentials: credentials})
 	if e == nil {
 		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
 		_, transport, e := WebsocketConnect(wsAddress, serializer)

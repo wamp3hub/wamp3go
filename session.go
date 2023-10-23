@@ -9,6 +9,7 @@ import (
 )
 
 const DEFAULT_TIMEOUT = time.Minute
+
 const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 type Session struct {
@@ -92,28 +93,32 @@ func Publish[I any](
 	return e
 }
 
+type resultCallback func(ReplyEvent)
+
 type PendingResult[T any] struct {
 	promise       shared.Promise[ReplyEvent]
 	cancelPromise shared.Cancellable
-	callbackList  []func(ReplyEvent)
+	callbackList  []resultCallback
 }
 
 func NewPendingResult[T any](
 	promise shared.Promise[ReplyEvent],
 	cancelPromise shared.Cancellable,
 ) *PendingResult[T] {
-	return &PendingResult[T]{promise, cancelPromise, []func(ReplyEvent){}}
+	return &PendingResult[T]{promise, cancelPromise, []resultCallback{}}
 }
 
-func (pending *PendingResult[T]) addCallback(f func(ReplyEvent)) {
+func (pending *PendingResult[T]) addCallback(f resultCallback) {
 	pending.callbackList = append(pending.callbackList, f)
 }
 
 func (pending *PendingResult[T]) Cancel() {
+	// TODO cancellation
 	pending.cancelPromise()
 }
 
 func (pending *PendingResult[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
+	// TODO 
 	replyEvent, done := <-pending.promise
 
 	for _, callback := range pending.callbackList {
@@ -122,12 +127,14 @@ func (pending *PendingResult[T]) Await() (replyEvent ReplyEvent, payload T, e er
 
 	if done {
 		if replyEvent.Kind() == MK_ERROR {
-			replyEvent.Payload(e)
+			__payload := new(errorEventPayload)
+			replyEvent.Payload(__payload)
+			e = errors.New(__payload.Code)
 		} else {
 			e = replyEvent.Payload(&payload)
 		}
 	} else {
-		e = errors.New("InternalException")
+		e = errors.New("SomethingWentWrong")
 	}
 	return replyEvent, payload, e
 }
@@ -193,19 +200,20 @@ func NewGenerator[O, I any](
 	result := Call[struct{}](session, callFeatures, payload)
 	yieldEvent, _, e := result.Await()
 
-	if yieldEvent.Kind() != MK_YIELD {
-		e = errors.New("ProcedureIsNotGenerator")
-	}
-
 	if e == nil {
-		g := generator[O]{false, yieldEvent.ID(), session.peer}
-		return &g, nil
+		if yieldEvent.Kind() == MK_YIELD {
+			g := generator[O]{false, yieldEvent.ID(), session.peer}
+			return &g, nil
+		} else {
+			e = errors.New("IsNotGenerator")
+		}
 	}
 
 	return nil, e
 }
 
 func Yield[I any](callEvent CallEvent, payload I) error {
+	// REFACTOR
 	nextYieldEvent := callEvent.getNextYield()
 	if nextYieldEvent == nil {
 		nextYieldEvent = newYieldEvent(callEvent, struct{}{})
@@ -270,15 +278,11 @@ func Register(
 	return nil, e
 }
 
-type DeleteResourcePayload struct {
-	ID string
-}
-
 func Unsubscribe(
 	session *Session,
 	subscriptionID string,
 ) error {
-	result := Call[any](session, &CallFeatures{"wamp.unsubscribe"}, DeleteResourcePayload{subscriptionID})
+	result := Call[any](session, &CallFeatures{"wamp.unsubscribe"}, subscriptionID)
 	_, _, e := result.Await()
 	return e
 }
@@ -287,7 +291,7 @@ func Unregister(
 	session *Session,
 	registrationID string,
 ) error {
-	result := Call[any](session, &CallFeatures{"wamp.unregister"}, DeleteResourcePayload{registrationID})
+	result := Call[any](session, &CallFeatures{"wamp.unregister"}, registrationID)
 	_, _, e := result.Await()
 	return e
 }

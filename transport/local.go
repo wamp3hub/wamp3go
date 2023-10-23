@@ -19,6 +19,7 @@ func (transport *localTransport) Send(event client.Event) error {
 }
 
 func (transport *localTransport) Receive(q client.QEvent) {
+	q <- nil
 	for event := range transport.rq {
 		q <- event
 	}
