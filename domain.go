@@ -19,10 +19,10 @@ const (
 )
 
 type messageProto[F any] struct {
-	id        string
-	kind      MessageKind
-	features  F
-	peer      *Peer
+	id       string
+	kind     MessageKind
+	features F
+	peer     *Peer
 }
 
 func (message *messageProto[F]) ID() string {
@@ -274,6 +274,7 @@ type Resource[T any] struct {
 	ID       string
 	URI      string
 	AuthorID string
+	Weight   uint16
 	Options  T
 }
 
