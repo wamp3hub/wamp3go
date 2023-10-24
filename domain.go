@@ -161,23 +161,12 @@ type CallEvent interface {
 	Features() *CallFeatures
 	messagePayload
 	Route() *CallRoute
-	setNextYield(ReplyEvent)
-	getNextYield() ReplyEvent
 }
 
 type callMessage struct {
 	*messageProto[*CallFeatures]
 	*messageRouteField[*CallRoute]
 	messagePayload
-	nextYield ReplyEvent
-}
-
-func (message *callMessage) setNextYield(instance ReplyEvent) {
-	message.nextYield = instance
-}
-
-func (message *callMessage) getNextYield() ReplyEvent {
-	return message.nextYield
 }
 
 func MakeCallEvent(
@@ -190,7 +179,6 @@ func MakeCallEvent(
 		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
-		nil,
 	}
 }
 
@@ -271,8 +259,11 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features, nil}}
 }
 
-func newNextEvent(generatorID string) NextEvent {
-	return MakeNextEvent(xid.New().String(), &NextFeatures{generatorID})
+func newNextEvent(source Event) NextEvent {
+	return MakeNextEvent(
+		xid.New().String(),
+		&NextFeatures{source.ID()},
+	)
 }
 
 type SubscribeOptions struct{}

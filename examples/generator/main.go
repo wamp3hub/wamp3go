@@ -9,19 +9,20 @@ import (
 )
 
 func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
+	source := wamp.Event(callEvent)
 	n := 0
 	e := callEvent.Payload(&n)
 	if e == nil {
 		for i := n; i > 0; i-- {
-			e = wamp.Yield(callEvent, i)
+			source, e = wamp.Yield(source, i)
 			if e != nil {
 				fmt.Printf("YieldError %s", e)
 				break
 			}
 		}
-		return wamp.NewReplyEvent(callEvent, 0)
+		return wamp.NewReplyEvent(source, 0)
 	}
-	return wamp.NewErrorEvent(callEvent, e)
+	return wamp.NewErrorEvent(source, e)
 }
 
 func main() {
@@ -48,16 +49,10 @@ func main() {
 		panic("RegisterError")
 	}
 
-	generator, e := wamp.NewGenerator[int](session, &wamp.CallFeatures{"example.reverse"}, 99)
-	if e == nil {
-		fmt.Printf("reverse generator created\n")
-	} else {
-		panic("failed to create generator")
-	}
+	generator := wamp.NewRemoteGenerator[int](session, &wamp.CallFeatures{URI: "example.reverse"}, 99)
 	for !generator.Done() {
 		fmt.Print("call(example.reversed): ")
-		result := generator.Next(wamp.DEFAULT_TIMEOUT)
-		_, v, e := result.Await()
+		v, e := generator.Next(wamp.DEFAULT_TIMEOUT)
 		if e == nil {
 			fmt.Printf("%d\n", v)
 		} else {

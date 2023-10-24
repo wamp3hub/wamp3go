@@ -52,18 +52,6 @@ func NewSession(peer *Peer) *Session {
 			if found {
 				replyEvent := endpoint(callEvent)
 
-				nextYieldEvent := callEvent.getNextYield()
-				if nextYieldEvent != nil {
-					nextEventPromise, _ := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-					e := session.peer.Say(nextYieldEvent)
-					if e == nil {
-						nextEvent, done := <-nextEventPromise
-						if done {
-							replyEvent = NewReplyEvent(nextEvent, replyEvent.Content())
-						}
-					}
-				}
-
 				e := session.peer.Say(replyEvent)
 				if e == nil {
 					log.Printf("[session] success call (ID=%s)", session.ID())
@@ -108,17 +96,13 @@ func NewPendingResult[T any](
 	return &PendingResult[T]{promise, cancelPromise, []resultCallback{}}
 }
 
-func (pending *PendingResult[T]) addCallback(f resultCallback) {
-	pending.callbackList = append(pending.callbackList, f)
-}
-
 func (pending *PendingResult[T]) Cancel() {
 	// TODO cancellation
 	pending.cancelPromise()
 }
 
 func (pending *PendingResult[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
-	// TODO 
+	// TODO
 	replyEvent, done := <-pending.promise
 
 	for _, callback := range pending.callbackList {
@@ -155,84 +139,65 @@ func Call[O, I any](
 	return pendingResult
 }
 
-type generator[T any] struct {
-	done   bool
-	nextID string
-	peer   *Peer
+type remoteGenerator[T any] struct {
+	done                bool
+	peer                *Peer
+	lastPendingResponse *PendingResult[T]
 }
 
-func (g *generator[T]) Done() bool {
-	return g.done
+func (generator *remoteGenerator[T]) Done() bool {
+	return generator.done
 }
 
-func (g *generator[T]) onYield(response ReplyEvent) {
-	if response.Kind() == MK_YIELD {
-		g.nextID = response.ID()
-	} else {
-		g.done = true
+func NewRemoteGenerator[O, I any](
+	session *Session,
+	callFeatures *CallFeatures,
+	payload I,
+) *remoteGenerator[O] {
+	pendingResult := Call[O](session, callFeatures, payload)
+	generator := remoteGenerator[O]{false, session.peer, pendingResult}
+	return &generator
+}
+
+func (generator *remoteGenerator[T]) Next(timeout time.Duration) (outPayload T, e error) {
+	if generator.Done() {
+		panic("GeneratorDone")
 	}
-}
-
-func (g *generator[T]) Next(timeout time.Duration) *PendingResult[T] {
-	nextEvent := newNextEvent(g.nextID)
+	response, outPayload, e := generator.lastPendingResponse.Await()
+	if response.Kind() != MK_YIELD {
+		generator.done = true
+		return outPayload, e
+	}
+	nextEvent := newNextEvent(response)
 	// TODO cancellation
-	replyEventPromise, cancelPromise := g.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
-	pendingResult := NewPendingResult[T](replyEventPromise, cancelPromise)
-	pendingResult.addCallback(g.onYield)
-	e := g.peer.Say(nextEvent)
-	if e != nil {
-		pendingResult.Cancel()
-	}
-	return pendingResult
+	replyEventPromise, cancelPromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
+	generator.lastPendingResponse = NewPendingResult[T](replyEventPromise, cancelPromise)
+	e = generator.peer.Say(nextEvent)
+	return outPayload, e
 }
 
-func (g *generator[T]) Stop() error {
-	g.done = true
+func (generator *remoteGenerator[T]) Stop() error {
+	generator.done = true
 	// TODO cancellation
 	return nil
 }
 
-func NewGenerator[O, I any](
-	session *Session,
-	callFeatures *CallFeatures,
-	payload I,
-) (*generator[O], error) {
-	result := Call[struct{}](session, callFeatures, payload)
-	yieldEvent, _, e := result.Await()
-
-	if e == nil {
-		if yieldEvent.Kind() == MK_YIELD {
-			g := generator[O]{false, yieldEvent.ID(), session.peer}
-			return &g, nil
-		} else {
-			e = errors.New("IsNotGenerator")
-		}
-	}
-
-	return nil, e
-}
-
-func Yield[I any](callEvent CallEvent, payload I) error {
-	// REFACTOR
-	nextYieldEvent := callEvent.getNextYield()
-	if nextYieldEvent == nil {
-		nextYieldEvent = newYieldEvent(callEvent, struct{}{})
-		callEvent.setNextYield(nextYieldEvent)
-		return nil
-	}
-
-	peer := callEvent.getPeer()
-	nextEventPromise, _ := peer.PendingNextEvents.New(nextYieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-	e := peer.Say(nextYieldEvent)
+func Yield[I any](
+	source Event,
+	inPayload I,
+) (nextEvent NextEvent, e error) {
+	yieldEvent := newYieldEvent(source, inPayload)
+	peer := source.getPeer()
+	nextEventPromise, _ := peer.PendingNextEvents.New(yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
+	e = peer.Say(yieldEvent)
 	if e == nil {
 		nextEvent, done := <-nextEventPromise
 		if done {
-			nextYieldEvent = newYieldEvent(nextEvent, payload)
-			callEvent.setNextYield(nextYieldEvent)
+			return nextEvent, nil
 		}
+		e = errors.New("TimedOut")
 	}
-
-	return e
+	return nil, e
 }
 
 type NewResourcePayload[O any] struct {
