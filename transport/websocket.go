@@ -3,10 +3,10 @@ package transport
 import (
 	"log"
 
+	"github.com/gorilla/websocket"
+
 	client "github.com/wamp3hub/wamp3go"
 	interview "github.com/wamp3hub/wamp3go/transport/interview"
-
-	"github.com/gorilla/websocket"
 )
 
 type wsTransport struct {
@@ -21,51 +21,41 @@ func WSTransport(
 	return &wsTransport{serializer, connection}
 }
 
-func (transport *wsTransport) Send(event client.Event) error {
-	rawMessage, e := transport.Serializer.Encode(event)
-	if e == nil {
-		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
-	} else {
-		log.Printf("[WSTransport] EncodeMessage: %s", e)
-	}
-	return e
-}
-
-func (transport *wsTransport) Receive(q client.QEvent) {
-	q <- nil
-	for {
-		WSMessageType, rawMessage, e := transport.Connection.ReadMessage()
-		if e != nil {
-			log.Printf("[WSTransport] %s (messageType=%d)", e, WSMessageType)
-			break
-		}
-		event, e := transport.Serializer.Decode(rawMessage)
-		if e == nil {
-			q <- event
-		} else {
-			log.Printf("[WSTransport] e=%s raw=%s", e, rawMessage)
-		}
-	}
-	close(q)
-}
-
 func (transport *wsTransport) Close() error {
 	e := transport.Connection.Close()
 	return e
 }
 
+func (transport *wsTransport) Write(event client.Event) error {
+	rawMessage, e := transport.Serializer.Encode(event)
+	if e == nil {
+		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
+	}
+	return e
+}
+
+func (transport *wsTransport) Read() (client.Event, error) {
+	_, rawMessage, e := transport.Connection.ReadMessage()
+	if e == nil {
+		event, e := transport.Serializer.Decode(rawMessage)
+		if e == nil {
+			return event, nil
+		}
+	}
+	return nil, e
+}
+
 func WebsocketConnect(
 	address string,
 	serializer client.Serializer,
-) (string, client.Transport, error) {
+) (client.Transport, error) {
 	log.Printf("[websocket] dial %s", address)
 	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
-		routerID := response.Header.Get("X-WAMP-RouterID")
-		return routerID, WSTransport(serializer, connection), nil
+		return WSTransport(serializer, connection), nil
 	}
 	log.Printf("[websocket] %s connect %s", response.Status, e)
-	return "", nil, e
+	return nil, e
 }
 
 func WebsocketJoin(
@@ -76,7 +66,7 @@ func WebsocketJoin(
 	payload, e := interview.HTTP2Interview(address, &interview.Payload{Credentials: credentials})
 	if e == nil {
 		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
-		_, transport, e := WebsocketConnect(wsAddress, serializer)
+		transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
 			peer := client.SpawnPeer(payload.YourID, transport)
 			session := client.NewSession(peer)

@@ -8,10 +8,6 @@ import (
 	"github.com/wamp3hub/wamp3go/shared"
 )
 
-const DEFAULT_QSIZE = 128
-
-type QEvent chan Event
-
 type Serializer interface {
 	Code() string
 	Encode(Event) ([]byte, error)
@@ -19,13 +15,12 @@ type Serializer interface {
 }
 
 type Transport interface {
-	Send(Event) error
-	Receive(QEvent)
 	Close() error
+	Read() (Event, error)
+	Write(Event) error
 }
 
 type Peer struct {
-	qSize                        int
 	ID                           string
 	Alive                        chan struct{}
 	writeMutex                   *sync.Mutex
@@ -44,7 +39,7 @@ type Peer struct {
 func (peer *Peer) send(event Event) error {
 	// avoid concurrent write
 	peer.writeMutex.Lock()
-	e := peer.Transport.Send(event)
+	e := peer.Transport.Write(event)
 	peer.writeMutex.Unlock()
 	return e
 }
@@ -70,15 +65,13 @@ func (peer *Peer) Close() error {
 	return e
 }
 
-func NewPeer(
+func newPeer(
 	ID string,
 	transport Transport,
-	qSize int,
 ) *Peer {
 	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
 	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
 	return &Peer{
-		qSize,
 		ID,
 		make(chan struct{}),
 		new(sync.Mutex),
@@ -96,16 +89,17 @@ func NewPeer(
 }
 
 func listenEvents(wg *sync.WaitGroup, peer *Peer) {
-	q := make(QEvent, peer.qSize)
-	go peer.Transport.Receive(q)
-	// transport must send first empty event
-	<-q
 	wg.Done()
 
-	for event := range q {
+	for {
+		event, e := peer.Transport.Read()
+		if e != nil {
+			log.Printf("[peer] transport error %e (ID=%s)", e, peer.ID)
+			break
+		}
+
 		event.setPeer(peer)
 
-		e := error(nil)
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
@@ -130,10 +124,8 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 			e = peer.acknowledge(event)
 		}
 
-		if e == nil {
-			log.Printf("[peer] success (ID=%s event.ID=%s)", peer.ID, event.ID())
-		} else {
-			log.Printf("[peer] error %e (ID=%s)", e, peer.ID)
+		if e != nil {
+			log.Printf("[peer] listener error %e (ID=%s)", e, peer.ID)
 		}
 	}
 
@@ -144,7 +136,7 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 }
 
 func SpawnPeer(ID string, transport Transport) *Peer {
-	peer := NewPeer(ID, transport, DEFAULT_QSIZE)
+	peer := newPeer(ID, transport)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
