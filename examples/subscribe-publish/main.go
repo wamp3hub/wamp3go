@@ -30,7 +30,7 @@ func main() {
 	}
 
 	onEcho := func(publishEvent wamp.PublishEvent) {
-		var payload string
+		payload := ""
 		publishEvent.Payload(&payload)
 		fmt.Printf("new message %s\n", payload)
 		wg.Done()

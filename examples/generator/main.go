@@ -8,23 +8,6 @@ import (
 	wampTransport "github.com/wamp3hub/wamp3go/transport"
 )
 
-func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
-	source := wamp.Event(callEvent)
-	n := 0
-	e := callEvent.Payload(&n)
-	if e == nil {
-		for i := n; i > 0; i-- {
-			source, e = wamp.Yield(source, i)
-			if e != nil {
-				fmt.Printf("YieldError %s", e)
-				break
-			}
-		}
-		return wamp.NewReplyEvent(source, 0)
-	}
-	return wamp.NewErrorEvent(source, e)
-}
-
 func main() {
 	type LoginPayload struct {
 		Username string `json:"username"`
@@ -42,7 +25,27 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := wamp.Register(session, "example.reverse", &wamp.RegisterOptions{}, reverse)
+	registration, e := wamp.Register(
+		session,
+		"example.reverse",
+		&wamp.RegisterOptions{},
+		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
+			source := wamp.Event(callEvent)
+			n := 0
+			e := callEvent.Payload(&n)
+			if e == nil {
+				for i := n; i > 0; i-- {
+					source, e = wamp.Yield(source, i)
+					if e != nil {
+						fmt.Printf("YieldError %s", e)
+						break
+					}
+				}
+				return wamp.NewReplyEvent(source, 0)
+			}
+			return wamp.NewErrorEvent(source, e)
+		},
+	)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {

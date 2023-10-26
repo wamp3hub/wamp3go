@@ -266,15 +266,18 @@ func newNextEvent(source Event) NextEvent {
 	)
 }
 
-type SubscribeOptions struct{}
+type SubscribeOptions struct {
+	Weight uint32
+}
 
-type RegisterOptions struct{}
+type RegisterOptions struct {
+	Weight uint32
+}
 
 type Resource[T any] struct {
 	ID       string
 	URI      string
 	AuthorID string
-	Weight   uint16
 	Options  T
 }
 

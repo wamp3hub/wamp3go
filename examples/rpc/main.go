@@ -41,8 +41,8 @@ func main() {
 		panic("RegisterError")
 	}
 
-	result := wamp.Call[string](session, &wamp.CallFeatures{URI: "example.greeting"}, "WAMP")
-	_, v, e := result.Await()
+	pendingResponse := wamp.Call[string](session, &wamp.CallFeatures{URI: "example.greeting"}, "WAMP")
+	_, v, e := pendingResponse.Await()
 	if e == nil {
 		fmt.Printf("call(example.greeting) %s\n", v)
 	} else {

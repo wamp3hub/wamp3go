@@ -50,7 +50,7 @@ func (peer *Peer) acknowledge(source Event) error {
 	return e
 }
 
-func (peer *Peer) Say(event Event) error {
+func (peer *Peer) Send(event Event) error {
 	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
 	peer.send(event)
 	_, done := <-acceptEventPromise

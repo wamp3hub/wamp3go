@@ -52,7 +52,7 @@ func NewSession(peer *Peer) *Session {
 			if found {
 				replyEvent := endpoint(callEvent)
 
-				e := session.peer.Say(replyEvent)
+				e := session.peer.Send(replyEvent)
 				if e == nil {
 					log.Printf("[session] success call (ID=%s)", session.ID())
 				} else {
@@ -77,37 +77,30 @@ func Publish[I any](
 	payload I,
 ) error {
 	publishEvent := NewPublishEvent(features, payload)
-	e := session.peer.Say(publishEvent)
+	e := session.peer.Send(publishEvent)
 	return e
 }
 
-type resultCallback func(ReplyEvent)
-
-type PendingResult[T any] struct {
+type PendingResponse[T any] struct {
 	promise       shared.Promise[ReplyEvent]
 	cancelPromise shared.Cancellable
-	callbackList  []resultCallback
 }
 
-func NewPendingResult[T any](
+func newPendingResponse[T any](
 	promise shared.Promise[ReplyEvent],
 	cancelPromise shared.Cancellable,
-) *PendingResult[T] {
-	return &PendingResult[T]{promise, cancelPromise, []resultCallback{}}
+) *PendingResponse[T] {
+	return &PendingResponse[T]{promise, cancelPromise}
 }
 
-func (pending *PendingResult[T]) Cancel() {
+func (pending *PendingResponse[T]) Cancel() {
 	// TODO cancellation
 	pending.cancelPromise()
 }
 
-func (pending *PendingResult[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
-	// TODO
+func (pending *PendingResponse[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
+	// TODO cancellation
 	replyEvent, done := <-pending.promise
-
-	for _, callback := range pending.callbackList {
-		callback(replyEvent)
-	}
 
 	if done {
 		if replyEvent.Kind() == MK_ERROR {
@@ -127,22 +120,22 @@ func Call[O, I any](
 	session *Session,
 	features *CallFeatures,
 	payload I,
-) *PendingResult[O] {
+) *PendingResponse[O] {
 	callEvent := NewCallEvent[I](features, payload)
 	// TODO cancellation
 	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(callEvent.ID(), DEFAULT_TIMEOUT)
-	pendingResult := NewPendingResult[O](replyEventPromise, cancelPromise)
-	e := session.peer.Say(callEvent)
+	pendingResponse := newPendingResponse[O](replyEventPromise, cancelPromise)
+	e := session.peer.Send(callEvent)
 	if e != nil {
-		pendingResult.Cancel()
+		pendingResponse.Cancel()
 	}
-	return pendingResult
+	return pendingResponse
 }
 
 type remoteGenerator[T any] struct {
 	done                bool
 	peer                *Peer
-	lastPendingResponse *PendingResult[T]
+	lastPendingResponse *PendingResponse[T]
 }
 
 func (generator *remoteGenerator[T]) Done() bool {
@@ -154,14 +147,14 @@ func NewRemoteGenerator[O, I any](
 	callFeatures *CallFeatures,
 	payload I,
 ) *remoteGenerator[O] {
-	pendingResult := Call[O](session, callFeatures, payload)
-	generator := remoteGenerator[O]{false, session.peer, pendingResult}
+	pendingResponse := Call[O](session, callFeatures, payload)
+	generator := remoteGenerator[O]{false, session.peer, pendingResponse}
 	return &generator
 }
 
 func (generator *remoteGenerator[T]) Next(timeout time.Duration) (outPayload T, e error) {
 	if generator.Done() {
-		panic("GeneratorDone")
+		panic("GeneratorExit")
 	}
 	response, outPayload, e := generator.lastPendingResponse.Await()
 	if response.Kind() != MK_YIELD {
@@ -171,8 +164,8 @@ func (generator *remoteGenerator[T]) Next(timeout time.Duration) (outPayload T, 
 	nextEvent := newNextEvent(response)
 	// TODO cancellation
 	replyEventPromise, cancelPromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
-	generator.lastPendingResponse = NewPendingResult[T](replyEventPromise, cancelPromise)
-	e = generator.peer.Say(nextEvent)
+	generator.lastPendingResponse = newPendingResponse[T](replyEventPromise, cancelPromise)
+	e = generator.peer.Send(nextEvent)
 	return outPayload, e
 }
 
@@ -189,7 +182,7 @@ func Yield[I any](
 	yieldEvent := newYieldEvent(source, inPayload)
 	peer := source.getPeer()
 	nextEventPromise, _ := peer.PendingNextEvents.New(yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-	e = peer.Say(yieldEvent)
+	e = peer.Send(yieldEvent)
 	if e == nil {
 		nextEvent, done := <-nextEventPromise
 		if done {
@@ -208,15 +201,15 @@ type NewResourcePayload[O any] struct {
 func Subscribe(
 	session *Session,
 	uri string,
-	features *SubscribeOptions,
+	options *SubscribeOptions,
 	endpoint PublishEndpoint,
 ) (*Subscription, error) {
-	result := Call[Subscription](
+	pendingResponse := Call[Subscription](
 		session,
 		&CallFeatures{"wamp.subscribe"},
-		NewResourcePayload[SubscribeOptions]{uri, features},
+		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
-	_, subscription, e := result.Await()
+	_, subscription, e := pendingResponse.Await()
 	if e == nil {
 		session.Subscriptions[subscription.ID] = endpoint
 		return &subscription, nil
@@ -227,15 +220,15 @@ func Subscribe(
 func Register(
 	session *Session,
 	uri string,
-	features *RegisterOptions,
+	options *RegisterOptions,
 	endpoint CallEndpoint,
 ) (*Registration, error) {
-	result := Call[Registration](
+	pendingResponse := Call[Registration](
 		session,
 		&CallFeatures{"wamp.register"},
-		NewResourcePayload[RegisterOptions]{uri, features},
+		NewResourcePayload[RegisterOptions]{uri, options},
 	)
-	_, registration, e := result.Await()
+	_, registration, e := pendingResponse.Await()
 	if e == nil {
 		session.Registrations[registration.ID] = endpoint
 		return &registration, nil
@@ -247,8 +240,8 @@ func Unsubscribe(
 	session *Session,
 	subscriptionID string,
 ) error {
-	result := Call[any](session, &CallFeatures{"wamp.unsubscribe"}, subscriptionID)
-	_, _, e := result.Await()
+	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unsubscribe"}, subscriptionID)
+	_, _, e := pendingResponse.Await()
 	return e
 }
 
@@ -256,8 +249,8 @@ func Unregister(
 	session *Session,
 	registrationID string,
 ) error {
-	result := Call[any](session, &CallFeatures{"wamp.unregister"}, registrationID)
-	_, _, e := result.Await()
+	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unregister"}, registrationID)
+	_, _, e := pendingResponse.Await()
 	return e
 }
 
