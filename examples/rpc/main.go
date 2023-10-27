@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -31,8 +32,11 @@ func main() {
 		&wamp.RegisterOptions{},
 		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
 			name := ""
-			callEvent.Payload(&name)
-			return wamp.NewReplyEvent(callEvent, "Hello, "+name+"!")
+			e := callEvent.Payload(&name)
+			if e == nil {
+				return wamp.NewReplyEvent(callEvent, "Hello, "+name+"!")
+			}
+			return wamp.NewErrorEvent(callEvent, errors.New("InvalidName"))
 		},
 	)
 	if e == nil {

@@ -138,8 +138,8 @@ type remoteGenerator[T any] struct {
 	lastPendingResponse *PendingResponse[T]
 }
 
-func (generator *remoteGenerator[T]) Done() bool {
-	return generator.done
+func (generator *remoteGenerator[T]) Active() bool {
+	return !generator.done
 }
 
 func NewRemoteGenerator[O, I any](
@@ -152,21 +152,21 @@ func NewRemoteGenerator[O, I any](
 	return &generator
 }
 
-func (generator *remoteGenerator[T]) Next(timeout time.Duration) (outPayload T, e error) {
-	if generator.Done() {
+func (generator *remoteGenerator[T]) Next(timeout time.Duration) (response ReplyEvent, outPayload T, e error) {
+	if generator.done {
 		panic("GeneratorExit")
 	}
-	response, outPayload, e := generator.lastPendingResponse.Await()
+	response, outPayload, e = generator.lastPendingResponse.Await()
 	if response.Kind() != MK_YIELD {
 		generator.done = true
-		return outPayload, e
+		return response, outPayload, e
 	}
 	nextEvent := newNextEvent(response)
 	// TODO cancellation
 	replyEventPromise, cancelPromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
 	generator.lastPendingResponse = newPendingResponse[T](replyEventPromise, cancelPromise)
 	e = generator.peer.Send(nextEvent)
-	return outPayload, e
+	return response, outPayload, e
 }
 
 func (generator *remoteGenerator[T]) Stop() error {
@@ -242,6 +242,9 @@ func Unsubscribe(
 ) error {
 	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unsubscribe"}, subscriptionID)
 	_, _, e := pendingResponse.Await()
+	if e == nil {
+		delete(session.Subscriptions, subscriptionID)
+	}
 	return e
 }
 
@@ -251,6 +254,9 @@ func Unregister(
 ) error {
 	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unregister"}, registrationID)
 	_, _, e := pendingResponse.Await()
+	if e == nil {
+		delete(session.Registrations, registrationID)
+	}
 	return e
 }
 

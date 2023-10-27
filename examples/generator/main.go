@@ -53,9 +53,9 @@ func main() {
 	}
 
 	generator := wamp.NewRemoteGenerator[int](session, &wamp.CallFeatures{URI: "example.reverse"}, 99)
-	for !generator.Done() {
+	for generator.Active() {
 		fmt.Print("call(example.reversed): ")
-		v, e := generator.Next(wamp.DEFAULT_TIMEOUT)
+		_, v, e := generator.Next(wamp.DEFAULT_TIMEOUT)
 		if e == nil {
 			fmt.Printf("%d\n", v)
 		} else {
