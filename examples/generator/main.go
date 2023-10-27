@@ -8,24 +8,12 @@ import (
 	wampTransport "github.com/wamp3hub/wamp3go/transport"
 )
 
-type LoginPayload struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-func reverse(callEvent wamp.CallEvent) wamp.ReplyEvent {
-	var n int
-	e := callEvent.Payload(&n)
-	if e == nil {
-		for i := n; i > 0; i-- {
-			wamp.Yield(callEvent, i)
-		}
-		return wamp.NewReplyEvent(callEvent, 0)
-	}
-	return wamp.NewErrorEvent(callEvent, e)
-}
-
 func main() {
+	type LoginPayload struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
 	session, e := wampTransport.WebsocketJoin(
 		"0.0.0.0:8888",
 		&wampSerializer.DefaultSerializer,
@@ -37,29 +25,42 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := session.Register("example.reverse", &wamp.RegisterOptions{}, reverse)
+	registration, e := wamp.Register(
+		session,
+		"example.reverse",
+		&wamp.RegisterOptions{},
+		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
+			source := wamp.Event(callEvent)
+			n := 0
+			e := callEvent.Payload(&n)
+			if e == nil {
+				for i := n; i > 0; i-- {
+					source, e = wamp.Yield(source, i)
+					if e != nil {
+						fmt.Printf("YieldError %s", e)
+						break
+					}
+				}
+				return wamp.NewReplyEvent(source, 0)
+			}
+			return wamp.NewErrorEvent(source, e)
+		},
+	)
 	if e == nil {
 		fmt.Printf("registration ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}
 
-	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{"example.reverse"}, 99)
-	generator := session.Call(callEvent)
-
-	var v int
-	for {
-		yieldEvent := wamp.Next(generator, wamp.DEFAULT_TIMEOUT)
-		e := yieldEvent.Error()
-		if e != nil {
-			fmt.Printf("error(example.reversed): %s\n", e)
-			break
-		} else if yieldEvent.Done() {
-			fmt.Print("generator done\n")
-			break
+	generator := wamp.NewRemoteGenerator[int](session, &wamp.CallFeatures{URI: "example.reverse"}, 99)
+	for generator.Active() {
+		fmt.Print("call(example.reversed): ")
+		_, v, e := generator.Next(wamp.DEFAULT_TIMEOUT)
+		if e == nil {
+			fmt.Printf("%d\n", v)
 		} else {
-			yieldEvent.Payload(&v)
-			fmt.Printf("call(example.reversed): %d\n", v)
+			fmt.Printf("error %s\n", e)
 		}
 	}
+	fmt.Print("generator done\n")
 }

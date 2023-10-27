@@ -8,8 +8,6 @@ import (
 	"github.com/wamp3hub/wamp3go/shared"
 )
 
-type QEvent chan Event
-
 type Serializer interface {
 	Code() string
 	Encode(Event) ([]byte, error)
@@ -17,13 +15,14 @@ type Serializer interface {
 }
 
 type Transport interface {
-	Send(Event) error
-	Receive(QEvent)
 	Close() error
+	Read() (Event, error)
+	Write(Event) error
 }
 
 type Peer struct {
 	ID                           string
+	Alive                        chan struct{}
 	writeMutex                   *sync.Mutex
 	Transport                    Transport
 	PendingAcceptEvents          shared.PendingMap[AcceptEvent]
@@ -37,11 +36,44 @@ type Peer struct {
 	closeCallEvents              shared.Closeable
 }
 
-func NewPeer(ID string, transport Transport) *Peer {
+func (peer *Peer) send(event Event) error {
+	// avoid concurrent write
+	peer.writeMutex.Lock()
+	e := peer.Transport.Write(event)
+	peer.writeMutex.Unlock()
+	return e
+}
+
+func (peer *Peer) acknowledge(source Event) error {
+	acceptEvent := newAcceptEvent(source)
+	e := peer.send(acceptEvent)
+	return e
+}
+
+func (peer *Peer) Send(event Event) error {
+	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
+	peer.send(event)
+	_, done := <-acceptEventPromise
+	if done {
+		return nil
+	}
+	return errors.New("TimedOut")
+}
+
+func (peer *Peer) Close() error {
+	e := peer.Transport.Close()
+	return e
+}
+
+func newPeer(
+	ID string,
+	transport Transport,
+) *Peer {
 	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
 	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
+		make(chan struct{}),
 		new(sync.Mutex),
 		transport,
 		shared.NewPendingMap[AcceptEvent](),
@@ -56,56 +88,60 @@ func NewPeer(ID string, transport Transport) *Peer {
 	}
 }
 
-func (peer *Peer) Send(event Event) error {
-	acceptEventPromise := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	// avoid concurrent write
-	peer.writeMutex.Lock()
-	peer.Transport.Send(event)
-	peer.writeMutex.Unlock()
-	_, done := <-acceptEventPromise
-	if done {
-		return nil
-	}
-	return errors.New("TimedOut")
-}
+func listenEvents(wg *sync.WaitGroup, peer *Peer) {
+	wg.Done()
 
-func (peer *Peer) Consume() {
-	q := make(QEvent, 128)
-	go peer.Transport.Receive(q)
-	for event := range q {
-		event.bind(peer)
+	for {
+		event, e := peer.Transport.Read()
+		if e != nil {
+			log.Printf("[peer] transport error %e (ID=%s)", e, peer.ID)
+			break
+		}
+
+		event.setPeer(peer)
 
 		switch event := event.(type) {
 		case AcceptEvent:
 			features := event.Features()
-			peer.PendingAcceptEvents.Complete(features.SourceID, event)
+			e = peer.PendingAcceptEvents.Complete(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e := peer.PendingReplyEvents.Complete(features.InvocationID, event)
+			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
 			if e == nil {
-				peer.Transport.Send(newAcceptEvent(event))
-			} else {
-				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
+				e = peer.acknowledge(event)
 			}
 		case NextEvent:
 			features := event.Features()
-			e := peer.PendingNextEvents.Complete(features.YieldID, event)
+			e = peer.PendingNextEvents.Complete(features.YieldID, event)
 			if e == nil {
-				peer.Transport.Send(newAcceptEvent(event))
-			} else {
-				log.Printf("[peer] %s (ID=%s event=%s)", e, peer.ID, event)
+				e = peer.acknowledge(event)
 			}
 		case PublishEvent:
 			peer.producePublishEvent(event)
-			peer.Transport.Send(newAcceptEvent(event))
+			e = peer.acknowledge(event)
 		case CallEvent:
 			peer.produceCallEvent(event)
-			peer.Transport.Send(newAcceptEvent(event))
-		default:
-			log.Printf("[peer] InvalidEvent (ID=%s event=%s)", peer.ID, event)
+			e = peer.acknowledge(event)
+		}
+
+		if e != nil {
+			log.Printf("[peer] listener error %e (ID=%s)", e, peer.ID)
 		}
 	}
 
 	peer.closePublishEvents()
 	peer.closeCallEvents()
+
+	close(peer.Alive)
+}
+
+func SpawnPeer(ID string, transport Transport) *Peer {
+	peer := newPeer(ID, transport)
+
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
+	go listenEvents(wg, peer)
+	wg.Wait()
+
+	return peer
 }

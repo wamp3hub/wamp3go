@@ -3,49 +3,22 @@ package transport
 import (
 	"log"
 
-	client "github.com/wamp3hub/wamp3go"
-	interview "github.com/wamp3hub/wamp3go/transport/interview"
-
 	"github.com/gorilla/websocket"
+
+	wamp "github.com/wamp3hub/wamp3go"
+	wampInterview "github.com/wamp3hub/wamp3go/transport/interview"
 )
 
 type wsTransport struct {
-	Serializer client.Serializer
+	Serializer wamp.Serializer
 	Connection *websocket.Conn
 }
 
 func WSTransport(
-	serializer client.Serializer,
+	serializer wamp.Serializer,
 	connection *websocket.Conn,
-) client.Transport {
+) wamp.Transport {
 	return &wsTransport{serializer, connection}
-}
-
-func (transport *wsTransport) Send(event client.Event) error {
-	rawMessage, e := transport.Serializer.Encode(event)
-	if e == nil {
-		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
-	} else {
-		log.Printf("[WSTransport] EncodeMessage: %s", e)
-	}
-	return e
-}
-
-func (transport *wsTransport) Receive(q client.QEvent) {
-	for {
-		WSMessageType, rawMessage, e := transport.Connection.ReadMessage()
-		if e != nil {
-			log.Printf("[WSTransport] %s (messageType=%d)", e, WSMessageType)
-			break
-		}
-		event, e := transport.Serializer.Decode(rawMessage)
-		if e == nil {
-			q <- event
-		} else {
-			log.Printf("[WSTransport] e=%s raw=%s", e, rawMessage)
-		}
-	}
-	close(q)
 }
 
 func (transport *wsTransport) Close() error {
@@ -53,15 +26,35 @@ func (transport *wsTransport) Close() error {
 	return e
 }
 
+func (transport *wsTransport) Write(event wamp.Event) error {
+	rawMessage, e := transport.Serializer.Encode(event)
+	if e == nil {
+		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
+	}
+	return e
+}
+
+func (transport *wsTransport) Read() (wamp.Event, error) {
+	_, rawMessage, e := transport.Connection.ReadMessage()
+	if e == nil {
+		event, e := transport.Serializer.Decode(rawMessage)
+		if e == nil {
+			return event, nil
+		}
+	}
+	return nil, e
+}
+
 func WebsocketConnect(
 	address string,
-	serializer client.Serializer,
-) (string, client.Transport, error) {
+	serializer wamp.Serializer,
+) (string, wamp.Transport, error) {
 	log.Printf("[websocket] dial %s", address)
 	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
 		routerID := response.Header.Get("X-WAMP-RouterID")
-		return routerID, WSTransport(serializer, connection), nil
+		transport := WSTransport(serializer, connection)
+		return routerID, transport, nil
 	}
 	log.Printf("[websocket] %s connect %s", response.Status, e)
 	return "", nil, e
@@ -69,17 +62,19 @@ func WebsocketConnect(
 
 func WebsocketJoin(
 	address string,
-	serializer client.Serializer,
+	serializer wamp.Serializer,
 	credentials any,
-) (*client.Session, error) {
-	payload, e := interview.HTTP2Interview(address, &interview.Payload{credentials})
+) (*wamp.Session, error) {
+	payload, e := wampInterview.HTTP2Interview(
+		address,
+		&wampInterview.Payload{Credentials: credentials},
+	)
 	if e == nil {
-		wsAddress := "ws://" + address + "/wamp3/websocket?token=" + payload.Token
+		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
 		_, transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
-			peer := client.NewPeer(payload.PeerID, transport)
-			go peer.Consume()
-			session := client.NewSession(peer)
+			peer := wamp.SpawnPeer(payload.YourID, transport)
+			session := wamp.NewSession(peer)
 			return session, nil
 		}
 	}

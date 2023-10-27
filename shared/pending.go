@@ -8,7 +8,11 @@ import (
 
 type Promise[T any] <-chan T
 
-func NewPromise[T any](timeout time.Duration) (Promise[T], func(T), func()) {
+type Completable[T any] func(T)
+
+type Cancellable func()
+
+func NewPromise[T any](timeout time.Duration) (Promise[T], Completable[T], Cancellable) {
 	instance := make(chan T, 1)
 
 	once := new(sync.Once)
@@ -38,10 +42,14 @@ func NewPendingMap[T any]() PendingMap[T] {
 func (pendingMap PendingMap[T]) New(
 	key string,
 	timeout time.Duration,
-) Promise[T] {
-	__promise, complete, _ := NewPromise[T](timeout)
+) (Promise[T], Cancellable) {
+	promise, complete, cancelPromise := NewPromise[T](timeout)
 	pendingMap[key] = complete
-	return __promise
+	cancel := func() {
+		delete(pendingMap, key)
+		cancelPromise()
+	}
+	return promise, cancel
 }
 
 func (pendingMap PendingMap[T]) Complete(key string, value T) error {

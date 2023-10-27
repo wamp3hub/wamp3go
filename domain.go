@@ -37,11 +37,11 @@ func (message *messageProto[F]) Features() F {
 	return message.features
 }
 
-func (message *messageProto[F]) bind(instance *Peer) {
+func (message *messageProto[F]) setPeer(instance *Peer) {
 	message.peer = instance
 }
 
-func (message *messageProto[F]) Peer() *Peer {
+func (message *messageProto[F]) getPeer() *Peer {
 	return message.peer
 }
 
@@ -78,8 +78,8 @@ func (field *messageRouteField[T]) Route() T {
 type Event interface {
 	ID() string
 	Kind() MessageKind
-	bind(*Peer)
-	Peer() *Peer
+	setPeer(*Peer)
+	getPeer() *Peer
 }
 
 type AcceptFeatures struct {
@@ -163,18 +163,19 @@ type CallEvent interface {
 	Route() *CallRoute
 }
 
+type callMessage struct {
+	*messageProto[*CallFeatures]
+	*messageRouteField[*CallRoute]
+	messagePayload
+}
+
 func MakeCallEvent(
 	id string,
 	features *CallFeatures,
 	data messagePayload,
 	route *CallRoute,
 ) CallEvent {
-	type message struct {
-		*messageProto[*CallFeatures]
-		*messageRouteField[*CallRoute]
-		messagePayload
-	}
-	return &message{
+	return &callMessage{
 		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
@@ -197,31 +198,7 @@ type ReplyFeatures struct {
 type ReplyEvent interface {
 	Event
 	Features() *ReplyFeatures
-	Error() error
-	Done() bool
 	messagePayload
-}
-
-type replyMessage struct {
-	*messageProto[*ReplyFeatures]
-	messagePayload
-}
-
-func (message *replyMessage) Done() bool {
-	return message.Kind() != MK_YIELD
-}
-
-func (message *replyMessage) Error() error {
-	if message.Kind() != MK_ERROR {
-		return nil
-	}
-
-	payload := new(ErrorEventPayload)
-	e := message.Payload(payload)
-	if e == nil {
-		return errors.New(payload.Code)
-	}
-	return e
 }
 
 func MakeReplyEvent(
@@ -230,7 +207,11 @@ func MakeReplyEvent(
 	features *ReplyFeatures,
 	data messagePayload,
 ) ReplyEvent {
-	return &replyMessage{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
+	type message struct {
+		*messageProto[*ReplyFeatures]
+		messagePayload
+	}
+	return &message{&messageProto[*ReplyFeatures]{id, kind, features, nil}, data}
 }
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {
@@ -242,14 +223,14 @@ func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 	)
 }
 
-type ErrorEventPayload struct {
+type errorEventPayload struct {
 	Code string `json:"code"`
 }
 
 func NewErrorEvent(source Event, e error) ReplyEvent {
 	errorMessage := e.Error()
-	payload := ErrorEventPayload{errorMessage}
-	data := messagePayloadField[ErrorEventPayload]{payload}
+	payload := errorEventPayload{errorMessage}
+	data := messagePayloadField[errorEventPayload]{payload}
 	return MakeReplyEvent(xid.New().String(), MK_ERROR, &ReplyFeatures{source.ID()}, &data)
 }
 
@@ -278,13 +259,20 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features, nil}}
 }
 
-func newNextEvent(generatorID string) NextEvent {
-	return MakeNextEvent(xid.New().String(), &NextFeatures{generatorID})
+func newNextEvent(source Event) NextEvent {
+	return MakeNextEvent(
+		xid.New().String(),
+		&NextFeatures{source.ID()},
+	)
 }
 
-type SubscribeOptions struct{}
+type SubscribeOptions struct {
+	Weight uint32
+}
 
-type RegisterOptions struct{}
+type RegisterOptions struct {
+	Weight uint32
+}
 
 type Resource[T any] struct {
 	ID       string
