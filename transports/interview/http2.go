@@ -1,4 +1,4 @@
-package interview
+package wampInterview
 
 import (
 	"bytes"

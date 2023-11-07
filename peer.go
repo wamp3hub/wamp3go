@@ -1,4 +1,4 @@
-package wamp3go
+package wamp
 
 import (
 	"errors"
@@ -25,19 +25,19 @@ type Peer struct {
 	Alive                        chan struct{}
 	writeMutex                   *sync.Mutex
 	Transport                    Transport
-	PendingAcceptEvents          shared.PendingMap[AcceptEvent]
-	PendingReplyEvents           shared.PendingMap[ReplyEvent]
-	PendingNextEvents            shared.PendingMap[NextEvent]
-	producePublishEvent          shared.Producible[PublishEvent]
-	ConsumeIncomingPublishEvents shared.Consumable[PublishEvent]
-	closePublishEvents           shared.Closeable
-	produceCallEvent             shared.Producible[CallEvent]
-	ConsumeIncomingCallEvents    shared.Consumable[CallEvent]
-	closeCallEvents              shared.Closeable
+	PendingAcceptEvents          wampShared.PendingMap[AcceptEvent]
+	PendingReplyEvents           wampShared.PendingMap[ReplyEvent]
+	PendingNextEvents            wampShared.PendingMap[NextEvent]
+	producePublishEvent          wampShared.Producible[PublishEvent]
+	ConsumeIncomingPublishEvents wampShared.Consumable[PublishEvent]
+	closePublishEvents           wampShared.Closeable
+	produceCallEvent             wampShared.Producible[CallEvent]
+	ConsumeIncomingCallEvents    wampShared.Consumable[CallEvent]
+	closeCallEvents              wampShared.Closeable
 }
 
-func (peer *Peer) send(event Event) error {
-	// avoid concurrent write
+func (peer *Peer) safe_send(event Event) error {
+	// prevent concurrent writes
 	peer.writeMutex.Lock()
 	e := peer.Transport.Write(event)
 	peer.writeMutex.Unlock()
@@ -46,13 +46,13 @@ func (peer *Peer) send(event Event) error {
 
 func (peer *Peer) acknowledge(source Event) error {
 	acceptEvent := newAcceptEvent(source)
-	e := peer.send(acceptEvent)
+	e := peer.safe_send(acceptEvent)
 	return e
 }
 
 func (peer *Peer) Send(event Event) error {
 	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	peer.send(event)
+	peer.safe_send(event)
 	_, done := <-acceptEventPromise
 	if done {
 		return nil
@@ -69,16 +69,16 @@ func newPeer(
 	ID string,
 	transport Transport,
 ) *Peer {
-	consumePublishEvents, producePublishEvent, closePublishEvents := shared.NewStream[PublishEvent]()
-	consumeCallEvents, produceCallEvent, closeCallEvents := shared.NewStream[CallEvent]()
+	consumePublishEvents, producePublishEvent, closePublishEvents := wampShared.NewStream[PublishEvent]()
+	consumeCallEvents, produceCallEvent, closeCallEvents := wampShared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
 		make(chan struct{}),
 		new(sync.Mutex),
 		transport,
-		shared.NewPendingMap[AcceptEvent](),
-		shared.NewPendingMap[ReplyEvent](),
-		shared.NewPendingMap[NextEvent](),
+		wampShared.NewPendingMap[AcceptEvent](),
+		wampShared.NewPendingMap[ReplyEvent](),
+		wampShared.NewPendingMap[NextEvent](),
 		producePublishEvent,
 		consumePublishEvents,
 		closePublishEvents,
@@ -135,7 +135,10 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 	close(peer.Alive)
 }
 
-func SpawnPeer(ID string, transport Transport) *Peer {
+func SpawnPeer(
+	ID string,
+	transport Transport,
+) *Peer {
 	peer := newPeer(ID, transport)
 
 	wg := new(sync.WaitGroup)

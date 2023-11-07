@@ -1,9 +1,9 @@
-package wamp3go
+package wamp
 
 import (
 	"errors"
 
-	"github.com/rs/xid"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 type MessageKind int8
@@ -97,7 +97,7 @@ func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
 
 func newAcceptEvent(source Event) AcceptEvent {
 	features := AcceptFeatures{source.ID()}
-	return MakeAcceptEvent(xid.New().String(), &features)
+	return MakeAcceptEvent(wampShared.NewID(), &features)
 }
 
 type PublishFeatures struct {
@@ -140,7 +140,7 @@ func MakePublishEvent(
 
 func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		features,
 		&messagePayloadField[T]{data},
 		new(PublishRoute),
@@ -186,7 +186,7 @@ func MakeCallEvent(
 
 func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		features,
 		&messagePayloadField[T]{data},
 		new(CallRoute),
@@ -219,7 +219,7 @@ func MakeReplyEvent(
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		MK_REPLY,
 		&ReplyFeatures{source.ID(), []string{}},
 		&messagePayloadField[T]{data},
@@ -234,12 +234,12 @@ func NewErrorEvent(source Event, e error) ReplyEvent {
 	errorMessage := e.Error()
 	payload := errorEventPayload{errorMessage}
 	data := messagePayloadField[errorEventPayload]{payload}
-	return MakeReplyEvent(xid.New().String(), MK_ERROR, &ReplyFeatures{source.ID(), []string{}}, &data)
+	return MakeReplyEvent(wampShared.NewID(), MK_ERROR, &ReplyFeatures{source.ID(), []string{}}, &data)
 }
 
 func newYieldEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		MK_YIELD,
 		&ReplyFeatures{source.ID(), []string{}},
 		&messagePayloadField[T]{data},
@@ -264,7 +264,7 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 
 func newNextEvent(source Event) NextEvent {
 	return MakeNextEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		&NextFeatures{source.ID()},
 	)
 }
@@ -277,7 +277,7 @@ type Resource[T any] struct {
 }
 
 type resourceOptions struct {
-	Route    []string `json:"route"`
+	Route []string `json:"route"`
 }
 
 func (options *resourceOptions) Entrypoint() string {

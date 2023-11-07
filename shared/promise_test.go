@@ -1,2 +1,2 @@
-package shared
+package wampShared
 

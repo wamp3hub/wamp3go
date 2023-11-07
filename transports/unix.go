@@ -1,9 +1,9 @@
-package transport
+package wampTransports
 
 import (
 	"net"
 
-	wamp "github.com/wamp3hub/wamp3go"
+	"github.com/wamp3hub/wamp3go"
 )
 
 type unixTransport struct {

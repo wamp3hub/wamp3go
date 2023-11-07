@@ -1,12 +1,12 @@
-package transport
+package wampTransports
 
 import (
 	"log"
 
 	"github.com/gorilla/websocket"
 
-	wamp "github.com/wamp3hub/wamp3go"
-	wampInterview "github.com/wamp3hub/wamp3go/transport/interview"
+	"github.com/wamp3hub/wamp3go"
+	"github.com/wamp3hub/wamp3go/transports/interview"
 )
 
 type wsTransport struct {
@@ -48,16 +48,15 @@ func (transport *wsTransport) Read() (wamp.Event, error) {
 func WebsocketConnect(
 	address string,
 	serializer wamp.Serializer,
-) (string, wamp.Transport, error) {
-	log.Printf("[websocket] dial %s", address)
+) (wamp.Transport, error) {
+	log.Printf("[http2-websocket] dial %s", address)
 	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
-		routerID := response.Header.Get("X-WAMP-RouterID")
 		transport := WSTransport(serializer, connection)
-		return routerID, transport, nil
+		return transport, nil
 	}
-	log.Printf("[websocket] %s connect %s", response.Status, e)
-	return "", nil, e
+	log.Printf("[http2-websocket] connect statusCode=%s error=%s", response.Status, e)
+	return nil, e
 }
 
 func WebsocketJoin(
@@ -71,7 +70,7 @@ func WebsocketJoin(
 	)
 	if e == nil {
 		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
-		_, transport, e := WebsocketConnect(wsAddress, serializer)
+		transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
 			peer := wamp.SpawnPeer(payload.YourID, transport)
 			session := wamp.NewSession(peer)

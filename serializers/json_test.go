@@ -1,17 +1,16 @@
-package serializer
+package wampSerializers
 
 import (
 	"testing"
 
-	client "github.com/wamp3hub/wamp3go"
-
-	"github.com/rs/xid"
+	wamp "github.com/wamp3hub/wamp3go"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
-func testPublishEventSerializer(t *testing.T, serializer client.Serializer) {
+func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedPayload := "test"
-	expectedFeatures := client.PublishFeatures{"wamp.test", []string{}, []string{xid.New().String()}}
-	newEvent := client.NewPublishEvent(&expectedFeatures, expectedPayload)
+	expectedFeatures := wamp.PublishFeatures{"wamp.test", []string{}, []string{wampShared.NewID()}}
+	newEvent := wamp.NewPublishEvent(&expectedFeatures, expectedPayload)
 	raw, e := serializer.Encode(newEvent)
 	if e != nil {
 		t.Fatal(e)
@@ -20,7 +19,7 @@ func testPublishEventSerializer(t *testing.T, serializer client.Serializer) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	event, ok := __event.(client.PublishEvent)
+	event, ok := __event.(wamp.PublishEvent)
 	if !ok {
 		t.Fatal("InvalidBehaviour")
 	}
@@ -36,10 +35,10 @@ func testPublishEventSerializer(t *testing.T, serializer client.Serializer) {
 	}
 }
 
-func testCallEventSerializer(t *testing.T, serializer client.Serializer) {
+func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedPayload := "test"
-	expectedFeatures := client.CallFeatures{"wamp.test"}
-	newEvent := client.NewCallEvent(&expectedFeatures, expectedPayload)
+	expectedFeatures := wamp.CallFeatures{"wamp.test"}
+	newEvent := wamp.NewCallEvent(&expectedFeatures, expectedPayload)
 	raw, e := serializer.Encode(newEvent)
 	if e != nil {
 		t.Fatal(e)
@@ -48,7 +47,7 @@ func testCallEventSerializer(t *testing.T, serializer client.Serializer) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	event, ok := __event.(client.CallEvent)
+	event, ok := __event.(wamp.CallEvent)
 	if !ok {
 		t.Fatal("InvalidBehaviour")
 	}
@@ -64,8 +63,8 @@ func testCallEventSerializer(t *testing.T, serializer client.Serializer) {
 	}
 }
 
-func testAcceptEventSerializer(t *testing.T, serializer client.Serializer) {
-	// expectedSourceID := xid.New().String()
+func testAcceptEventSerializer(t *testing.T, serializer wamp.Serializer) {
+	// expectedSourceID := wampShared.NewID()
 	// newEvent := client.newAcceptEvent(expectedSourceID)
 	// raw, e := serializer.Encode(newEvent)
 	// if e != nil {
@@ -85,8 +84,8 @@ func testAcceptEventSerializer(t *testing.T, serializer client.Serializer) {
 	// }
 }
 
-func testReplyEventSerializer(t *testing.T, serializer client.Serializer) {
-	// invocationID := xid.New().String()
+func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
+	// invocationID := wampShared.NewID()
 	// expectedPayload := "test"
 	// newEvent := client.NewReplyEvent(invocationID, expectedPayload)
 	// raw, e := serializer.Encode(newEvent)

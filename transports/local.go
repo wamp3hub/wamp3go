@@ -1,6 +1,6 @@
-package transport
+package wampTransports
 
-import wamp "github.com/wamp3hub/wamp3go"
+import "github.com/wamp3hub/wamp3go"
 
 type QEvent chan wamp.Event
 

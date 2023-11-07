@@ -1,4 +1,4 @@
-package wamp3go
+package wamp
 
 import (
 	"errors"
@@ -82,13 +82,13 @@ func Publish[I any](
 }
 
 type PendingResponse[T any] struct {
-	promise       shared.Promise[ReplyEvent]
-	cancelPromise shared.Cancellable
+	promise       wampShared.Promise[ReplyEvent]
+	cancelPromise wampShared.Cancellable
 }
 
 func newPendingResponse[T any](
-	promise shared.Promise[ReplyEvent],
-	cancelPromise shared.Cancellable,
+	promise wampShared.Promise[ReplyEvent],
+	cancelPromise wampShared.Cancellable,
 ) *PendingResponse[T] {
 	return &PendingResponse[T]{promise, cancelPromise}
 }
