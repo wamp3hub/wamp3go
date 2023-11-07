@@ -3,7 +3,7 @@ package wampTransports
 import (
 	"net"
 
-	"github.com/wamp3hub/wamp3go"
+	wamp "github.com/wamp3hub/wamp3go"
 )
 
 type unixTransport struct {

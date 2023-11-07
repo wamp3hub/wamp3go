@@ -26,7 +26,7 @@ func HTTP2Interview(address string, requestPayload *Payload) (*SuccessPayload, e
 	requestBodyBytes, e := json.Marshal(requestPayload)
 	if e == nil {
 		requestBody := bytes.NewBuffer(requestBodyBytes)
-		url := "http://" + address + "/wamp3/interview"
+		url := "http://" + address + "/wamp/v1/interview"
 		request, _ := http.NewRequest("POST", url, requestBody)
 		request.Header.Set("Content-Type", "application/json")
 		client := new(http.Client)

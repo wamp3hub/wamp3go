@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/wamp3hub/wamp3go/shared"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 type Serializer interface {

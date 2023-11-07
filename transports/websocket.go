@@ -5,8 +5,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/wamp3hub/wamp3go"
-	"github.com/wamp3hub/wamp3go/transports/interview"
+	wamp "github.com/wamp3hub/wamp3go"
+	wampInterview "github.com/wamp3hub/wamp3go/transports/interview"
 )
 
 type wsTransport struct {
@@ -69,7 +69,7 @@ func WebsocketJoin(
 		&wampInterview.Payload{Credentials: credentials},
 	)
 	if e == nil {
-		wsAddress := "ws://" + address + "/wamp3/websocket?ticket=" + payload.Ticket
+		wsAddress := "ws://" + address + "/wamp/v1/websocket?ticket=" + payload.Ticket
 		transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
 			peer := wamp.SpawnPeer(payload.YourID, transport)

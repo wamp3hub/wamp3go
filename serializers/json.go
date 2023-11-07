@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/wamp3hub/wamp3go"
+	wamp "github.com/wamp3hub/wamp3go"
 )
 
 type jsonPayloadField struct {
@@ -29,7 +29,7 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 	switch event := event.(type) {
 	case wamp.AcceptEvent:
 		type jsonAcceptMessage struct {
-			ID       string                 `json:"ID"`
+			ID       string               `json:"ID"`
 			Kind     wamp.MessageKind     `json:"kind"`
 			Features *wamp.AcceptFeatures `json:"features"`
 		}
@@ -37,36 +37,36 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		return json.Marshal(message)
 	case wamp.ReplyEvent:
 		type jsonReplyMessage struct {
-			ID       string                `json:"ID"`
+			ID       string              `json:"ID"`
 			Kind     wamp.MessageKind    `json:"kind"`
 			Features *wamp.ReplyFeatures `json:"features"`
-			Payload  any                   `json:"payload"`
+			Payload  any                 `json:"payload"`
 		}
 		message := jsonReplyMessage{event.ID(), event.Kind(), event.Features(), event.Content()}
 		return json.Marshal(message)
 	case wamp.PublishEvent:
 		type jsonPublishMessage struct {
-			ID       string                  `json:"ID"`
+			ID       string                `json:"ID"`
 			Kind     wamp.MessageKind      `json:"kind"`
 			Features *wamp.PublishFeatures `json:"features"`
-			Payload  any                     `json:"payload"`
+			Payload  any                   `json:"payload"`
 			Route    *wamp.PublishRoute    `json:"route"`
 		}
 		message := jsonPublishMessage{event.ID(), event.Kind(), event.Features(), event.Content(), event.Route()}
 		return json.Marshal(message)
 	case wamp.CallEvent:
 		type jsonCallMessage struct {
-			ID       string               `json:"ID"`
+			ID       string             `json:"ID"`
 			Kind     wamp.MessageKind   `json:"kind"`
 			Features *wamp.CallFeatures `json:"features"`
-			Payload  any                  `json:"payload"`
+			Payload  any                `json:"payload"`
 			Route    *wamp.CallRoute    `json:"route"`
 		}
 		message := jsonCallMessage{event.ID(), event.Kind(), event.Features(), event.Content(), event.Route()}
 		return json.Marshal(message)
 	case wamp.NextEvent:
 		type jsonNextMessage struct {
-			ID       string               `json:"ID"`
+			ID       string             `json:"ID"`
 			Kind     wamp.MessageKind   `json:"kind"`
 			Features *wamp.NextFeatures `json:"features"`
 		}
@@ -86,7 +86,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 		switch message.Kind {
 		case wamp.MK_ACCEPT:
 			type jsonAcceptMessage struct {
-				ID       string                 `json:"ID"`
+				ID       string               `json:"ID"`
 				Kind     wamp.MessageKind     `json:"kind"`
 				Features *wamp.AcceptFeatures `json:"features"`
 			}
@@ -95,20 +95,20 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			event = wamp.MakeAcceptEvent(message.ID, message.Features)
 		case wamp.MK_REPLY, wamp.MK_ERROR, wamp.MK_YIELD:
 			type jsonReplyMessage struct {
-				ID       string                `json:"ID"`
+				ID       string              `json:"ID"`
 				Kind     wamp.MessageKind    `json:"kind"`
 				Features *wamp.ReplyFeatures `json:"features"`
-				Payload  json.RawMessage       `json:"payload"`
+				Payload  json.RawMessage     `json:"payload"`
 			}
 			message := new(jsonReplyMessage)
 			e = json.Unmarshal(v, &message)
 			event = wamp.MakeReplyEvent(message.ID, message.Kind, message.Features, &jsonPayloadField{message.Payload})
 		case wamp.MK_PUBLISH:
 			type jsonPublishMessage struct {
-				ID       string                  `json:"ID"`
+				ID       string                `json:"ID"`
 				Kind     wamp.MessageKind      `json:"kind"`
 				Features *wamp.PublishFeatures `json:"features"`
-				Payload  json.RawMessage         `json:"payload"`
+				Payload  json.RawMessage       `json:"payload"`
 				Route    *wamp.PublishRoute    `json:"route"`
 			}
 			message := jsonPublishMessage{Route: new(wamp.PublishRoute)}
@@ -116,10 +116,10 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			event = wamp.MakePublishEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
 		case wamp.MK_CALL:
 			type jsonCallMessage struct {
-				ID       string               `json:"ID"`
+				ID       string             `json:"ID"`
 				Kind     wamp.MessageKind   `json:"kind"`
 				Features *wamp.CallFeatures `json:"features"`
-				Payload  json.RawMessage      `json:"payload"`
+				Payload  json.RawMessage    `json:"payload"`
 				Route    *wamp.CallRoute    `json:"route"`
 			}
 			message := jsonCallMessage{Route: new(wamp.CallRoute)}
@@ -127,7 +127,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			event = wamp.MakeCallEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
 		case wamp.MK_NEXT:
 			type jsonNextMessage struct {
-				ID       string               `json:"ID"`
+				ID       string             `json:"ID"`
 				Kind     wamp.MessageKind   `json:"kind"`
 				Features *wamp.NextFeatures `json:"features"`
 			}

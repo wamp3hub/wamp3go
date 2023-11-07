@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/wamp3hub/wamp3go/shared"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 const DEFAULT_TIMEOUT = time.Minute
