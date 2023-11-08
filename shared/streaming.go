@@ -1,4 +1,4 @@
-package shared
+package wampShared
 
 type nextFunction[T any] func(T)
 type completeFunction func()

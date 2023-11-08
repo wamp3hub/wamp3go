@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	wamp "github.com/wamp3hub/wamp3go"
-	wampSerializer "github.com/wamp3hub/wamp3go/serializer"
-	wampTransport "github.com/wamp3hub/wamp3go/transport"
+	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
+	wampTransports "github.com/wamp3hub/wamp3go/transports"
 )
 
 func main() {
@@ -14,9 +14,10 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	session, e := wampTransport.WebsocketJoin(
+	session, e := wampTransports.WebsocketJoin(
 		"0.0.0.0:8888",
-		&wampSerializer.DefaultSerializer,
+		false,
+		wampSerializers.DefaultSerializer,
 		&LoginPayload{"test", "test"},
 	)
 	if e == nil {

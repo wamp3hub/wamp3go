@@ -1,9 +1,9 @@
-package wamp3go
+package wamp
 
 import (
 	"errors"
 
-	"github.com/rs/xid"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 type MessageKind int8
@@ -97,19 +97,20 @@ func MakeAcceptEvent(id string, features *AcceptFeatures) AcceptEvent {
 
 func newAcceptEvent(source Event) AcceptEvent {
 	features := AcceptFeatures{source.ID()}
-	return MakeAcceptEvent(xid.New().String(), &features)
+	return MakeAcceptEvent(wampShared.NewID(), &features)
 }
 
 type PublishFeatures struct {
-	URI     string
-	Include []string
-	Exclude []string
+	URI     string   `json:"URI"`
+	Include []string `json:"include"`
+	Exclude []string `json:"exclude"`
 }
 
 type PublishRoute struct {
-	PublisherID  string `json:"publisherID"`
-	SubscriberID string `json:"subscriberID"`
-	EndpointID   string `json:"endpointID"`
+	PublisherID    string   `json:"publisherID"`
+	SubscriberID   string   `json:"subscriberID"`
+	EndpointID     string   `json:"endpointID"`
+	VisitedRouters []string `json:"visitedRouters"`
 }
 
 type PublishEvent interface {
@@ -139,7 +140,7 @@ func MakePublishEvent(
 
 func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		features,
 		&messagePayloadField[T]{data},
 		new(PublishRoute),
@@ -147,13 +148,14 @@ func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 }
 
 type CallFeatures struct {
-	URI string `json:"uri"`
+	URI string `json:"URI"`
 }
 
 type CallRoute struct {
-	CallerID   string `json:"callerID"`
-	ExecutorID string `json:"executorID"`
-	EndpointID string `json:"endpointID"`
+	CallerID       string   `json:"callerID"`
+	ExecutorID     string   `json:"executorID"`
+	EndpointID     string   `json:"endpointID"`
+	VisitedRouters []string `json:"visitedRouters"`
 }
 
 type CallEvent interface {
@@ -184,7 +186,7 @@ func MakeCallEvent(
 
 func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		features,
 		&messagePayloadField[T]{data},
 		new(CallRoute),
@@ -192,7 +194,8 @@ func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
 }
 
 type ReplyFeatures struct {
-	InvocationID string `json:"invocationID"`
+	InvocationID   string   `json:"invocationID"`
+	VisitedRouters []string `json:"visitedRouters"`
 }
 
 type ReplyEvent interface {
@@ -216,9 +219,9 @@ func MakeReplyEvent(
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		MK_REPLY,
-		&ReplyFeatures{source.ID()},
+		&ReplyFeatures{source.ID(), []string{}},
 		&messagePayloadField[T]{data},
 	)
 }
@@ -231,14 +234,14 @@ func NewErrorEvent(source Event, e error) ReplyEvent {
 	errorMessage := e.Error()
 	payload := errorEventPayload{errorMessage}
 	data := messagePayloadField[errorEventPayload]{payload}
-	return MakeReplyEvent(xid.New().String(), MK_ERROR, &ReplyFeatures{source.ID()}, &data)
+	return MakeReplyEvent(wampShared.NewID(), MK_ERROR, &ReplyFeatures{source.ID(), []string{}}, &data)
 }
 
 func newYieldEvent[T any](source Event, data T) ReplyEvent {
 	return MakeReplyEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		MK_YIELD,
-		&ReplyFeatures{source.ID()},
+		&ReplyFeatures{source.ID(), []string{}},
 		&messagePayloadField[T]{data},
 	)
 }
@@ -261,25 +264,33 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 
 func newNextEvent(source Event) NextEvent {
 	return MakeNextEvent(
-		xid.New().String(),
+		wampShared.NewID(),
 		&NextFeatures{source.ID()},
 	)
 }
 
-type SubscribeOptions struct {
-	Weight uint32
-}
-
-type RegisterOptions struct {
-	Weight uint32
-}
-
 type Resource[T any] struct {
-	ID       string
-	URI      string
-	AuthorID string
-	Options  T
+	ID       string `json:"ID"`
+	URI      string `json:"URI"`
+	AuthorID string `json:"authorID"`
+	Options  T      `json:"options"`
 }
+
+type resourceOptions struct {
+	Route []string `json:"route"`
+}
+
+func (options *resourceOptions) Entrypoint() string {
+	return options.Route[0]
+}
+
+func (options *resourceOptions) Distance() int {
+	return len(options.Route)
+}
+
+type SubscribeOptions = resourceOptions
+
+type RegisterOptions = resourceOptions
 
 type Subscription = Resource[*SubscribeOptions]
 
