@@ -22,34 +22,36 @@ type SuccessPayload struct {
 	Ticket   string `json:"ticket"`
 }
 
-func HTTP2Interview(address string, requestPayload *Payload) (*SuccessPayload, error) {
+func ReadJSONBody(body io.ReadCloser, v any) error {
+	bodyBytes, e := io.ReadAll(body)
+	if e == nil {
+		body.Close()
+		e = json.Unmarshal(bodyBytes, v)
+	}
+	return e
+}
+
+func HTTP2Interview(address string, secure bool, requestPayload *Payload) (*SuccessPayload, error) {
 	requestBodyBytes, e := json.Marshal(requestPayload)
 	if e == nil {
 		requestBody := bytes.NewBuffer(requestBodyBytes)
 		url := "http://" + address + "/wamp/v1/interview"
-		request, _ := http.NewRequest("POST", url, requestBody)
-		request.Header.Set("Content-Type", "application/json")
-		client := new(http.Client)
-		response, e := client.Do(request)
-		if e == nil {
-			responseBody, e := io.ReadAll(response.Body)
+		response, _ := http.Post(url, "application/json", requestBody)
+		if response.StatusCode == 200 {
+			responsePayload := new(SuccessPayload)
+			e = ReadJSONBody(response.Body, responsePayload)
 			if e == nil {
-				response.Body.Close()
-				if response.StatusCode == 200 {
-					responsePayload := SuccessPayload{}
-					e = json.Unmarshal(responseBody, &responsePayload)
-					if e == nil {
-						return &responsePayload, nil
-					}
-				} else {
-					responsePayload := ErrorPayload{}
-					e = json.Unmarshal(responseBody, &responsePayload)
-					if e == nil {
-						e = errors.New(responsePayload.Code)
-					}
-				}
+				return responsePayload, nil
+			}
+		} else if response.StatusCode == 400 {
+			responsePayload := new(ErrorPayload)
+			e = ReadJSONBody(response.Body, responsePayload)
+			if e == nil {
+				return nil, errors.New(responsePayload.Code)
 			}
 		}
+
+		e = errors.New("interview " + response.Status)
 	}
 	return nil, e
 }

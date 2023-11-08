@@ -1,6 +1,8 @@
 package wampTransports
 
 import (
+	"bufio"
+	"encoding/json"
 	"net"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -9,13 +11,18 @@ import (
 type unixTransport struct {
 	Serializer wamp.Serializer
 	Connection net.Conn
+	buffer     *bufio.Reader
 }
 
 func UnixTransport(
 	serializer wamp.Serializer,
 	connection net.Conn,
-) wamp.Transport {
-	return &unixTransport{serializer, connection}
+) *unixTransport {
+	return &unixTransport{
+		serializer,
+		connection,
+		bufio.NewReader(connection),
+	}
 }
 
 func (transport *unixTransport) Close() error {
@@ -23,20 +30,45 @@ func (transport *unixTransport) Close() error {
 	return e
 }
 
-func (transport *unixTransport) Write(event wamp.Event) error {
-	rawMessage, e := transport.Serializer.Encode(event)
+func (transport *unixTransport) WriteRaw(data []byte) error {
+	data = append(data, byte('\n'))
+	_, e := transport.Connection.Write(data)
+	return e
+}
+
+func (transport *unixTransport) WriteJSON(payload any) error {
+	rawMessage, e := json.Marshal(payload)
 	if e == nil {
-		_, e = transport.Connection.Write(rawMessage)
+		e = transport.WriteRaw(rawMessage)
 	}
 	return e
 }
 
-func (transport *unixTransport) Read() (wamp.Event, error) {
-	buffer := make([]byte, 1024)
-	n, e := transport.Connection.Read(buffer)
+func (transport *unixTransport) Write(event wamp.Event) error {
+	rawMessage, e := transport.Serializer.Encode(event)
 	if e == nil {
-		rawMessage := buffer[0:n]
-		event, e := transport.Serializer.Decode(rawMessage)
+		e = transport.WriteRaw(rawMessage)
+	}
+	return e
+}
+
+func (transport *unixTransport) ReadRaw() ([]byte, error) {
+	rawMessage, _, e := transport.buffer.ReadLine()
+	return rawMessage, e
+}
+
+func (transport *unixTransport) ReadJSON(payload any) error {
+	rawMessage, e := transport.ReadRaw()
+	if e == nil {
+		e = json.Unmarshal(rawMessage, payload)
+	}
+	return e
+}
+
+func (transport *unixTransport) Read() (event wamp.Event, e error) {
+	rawMessage, e := transport.ReadRaw()
+	if e == nil {
+		event, e = transport.Serializer.Decode(rawMessage)
 		if e == nil {
 			return event, nil
 		}
@@ -44,25 +76,42 @@ func (transport *unixTransport) Read() (wamp.Event, error) {
 	return nil, e
 }
 
+type UnixServerMessage struct {
+	RouterID string `json:"routerID"`
+	YourID   string `json:"yourID"`
+}
+
+type UnixClientMessage struct {
+	SerializerCode string `json:"serializerCode"`
+}
+
 func UnixConnect(
 	address string,
 	serializer wamp.Serializer,
-) (wamp.Transport, error) {
+) (wamp.Transport, string, error) {
 	connection, e := net.Dial("unix", address)
 	if e == nil {
 		transport := UnixTransport(serializer, connection)
-		return transport, nil
+		serverMessage := new(UnixServerMessage)
+		e = transport.ReadJSON(serverMessage)
+		if e == nil {
+			clientMessage := UnixClientMessage{serializer.Code()}
+			e = transport.WriteJSON(clientMessage)
+			if e == nil {
+				return transport, serverMessage.YourID, nil
+			}
+		}
 	}
-	return nil, e
+	return nil, "", e
 }
 
 func UnixJoin(
 	address string,
 	serializer wamp.Serializer,
 ) (*wamp.Session, error) {
-	transport, e := UnixConnect(address, serializer)
+	transport, peerID, e := UnixConnect(address, serializer)
 	if e == nil {
-		peer := wamp.SpawnPeer("", transport)
+		peer := wamp.SpawnPeer(peerID, transport)
 		session := wamp.NewSession(peer)
 		return session, nil
 	}

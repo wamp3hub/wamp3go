@@ -144,4 +144,4 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 	return nil, e
 }
 
-var DefaultSerializer JSONSerializer
+var DefaultSerializer = new(JSONSerializer)
