@@ -2,6 +2,7 @@ package wamp
 
 import (
 	"errors"
+	"strings"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
@@ -14,8 +15,9 @@ const (
 	MK_CALL                = 127
 	MK_NEXT                = 126
 	MK_REPLY               = -127
-	MK_YIELD               = -126
-	MK_ERROR               = -125
+	MK_CANCEL              = -126
+	MK_YIELD               = -125
+	MK_ERROR               = -124
 )
 
 type messageProto[F any] struct {
@@ -165,19 +167,18 @@ type CallEvent interface {
 	Route() *CallRoute
 }
 
-type callMessage struct {
-	*messageProto[*CallFeatures]
-	*messageRouteField[*CallRoute]
-	messagePayload
-}
-
 func MakeCallEvent(
 	id string,
 	features *CallFeatures,
 	data messagePayload,
 	route *CallRoute,
 ) CallEvent {
-	return &callMessage{
+	type message struct {
+		*messageProto[*CallFeatures]
+		*messageRouteField[*CallRoute]
+		messagePayload
+	}
+	return &message{
 		&messageProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&messageRouteField[*CallRoute]{route},
 		data,
@@ -237,13 +238,34 @@ func NewErrorEvent(source Event, e error) ReplyEvent {
 	return MakeReplyEvent(wampShared.NewID(), MK_ERROR, &ReplyFeatures{source.ID(), []string{}}, &data)
 }
 
-func newYieldEvent[T any](source Event, data T) ReplyEvent {
+type YieldEvent = ReplyEvent
+
+func newYieldEvent[T any](source Event, data T) YieldEvent {
 	return MakeReplyEvent(
 		wampShared.NewID(),
 		MK_YIELD,
 		&ReplyFeatures{source.ID(), []string{}},
 		&messagePayloadField[T]{data},
 	)
+}
+
+type CancelEvent interface {
+	Event
+	Features() *ReplyFeatures
+}
+
+func MakeCancelEvent(
+	id string,
+	features *ReplyFeatures,
+) CancelEvent {
+	type message struct {
+		*messageProto[*ReplyFeatures]
+	}
+	return &message{&messageProto[*ReplyFeatures]{id, MK_CANCEL, features, nil}}
+}
+
+func newCancelEvent(source Event) CancelEvent {
+	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{source.ID(), []string{}})
 }
 
 type NextFeatures struct {
@@ -274,6 +296,10 @@ type Resource[T any] struct {
 	URI      string `json:"URI"`
 	AuthorID string `json:"authorID"`
 	Options  T      `json:"options"`
+}
+
+func (resource *Resource[T]) Native() bool {
+	return strings.HasPrefix(resource.URI, "wamp.")
 }
 
 type resourceOptions struct {

@@ -32,8 +32,8 @@ func NewSession(peer *Peer) *Session {
 	session.peer.ConsumeIncomingPublishEvents(
 		func(publishEvent PublishEvent) {
 			route := publishEvent.Route()
-			endpoint, found := session.Subscriptions[route.EndpointID]
-			if found {
+			endpoint, exists := session.Subscriptions[route.EndpointID]
+			if exists {
 				endpoint(publishEvent)
 			} else {
 				log.Printf(
@@ -48,8 +48,8 @@ func NewSession(peer *Peer) *Session {
 	session.peer.ConsumeIncomingCallEvents(
 		func(callEvent CallEvent) {
 			route := callEvent.Route()
-			endpoint, found := session.Registrations[route.EndpointID]
-			if found {
+			endpoint, exists := session.Registrations[route.EndpointID]
+			if exists {
 				replyEvent := endpoint(callEvent)
 
 				e := session.peer.Send(replyEvent)
@@ -82,6 +82,7 @@ func Publish[I any](
 }
 
 type PendingResponse[T any] struct {
+	used          bool
 	promise       wampShared.Promise[ReplyEvent]
 	cancelPromise wampShared.Cancellable
 }
@@ -90,19 +91,28 @@ func newPendingResponse[T any](
 	promise wampShared.Promise[ReplyEvent],
 	cancelPromise wampShared.Cancellable,
 ) *PendingResponse[T] {
-	return &PendingResponse[T]{promise, cancelPromise}
+	return &PendingResponse[T]{false, promise, cancelPromise}
 }
 
-func (pending *PendingResponse[T]) Cancel() {
-	// TODO cancellation
-	pending.cancelPromise()
+func (pendingResponse *PendingResponse[T]) markAsUsed() {
+	if pendingResponse.used {
+		panic("can not use again")
+	}
+	pendingResponse.used = true
 }
 
-func (pending *PendingResponse[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
-	// TODO cancellation
-	replyEvent, done := <-pending.promise
+func (pendingResponse *PendingResponse[T]) Cancel() {
+	pendingResponse.markAsUsed()
 
-	if done {
+	pendingResponse.cancelPromise()
+}
+
+func (pendingResponse *PendingResponse[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
+	pendingResponse.markAsUsed()
+
+	replyEvent, promiseCompleted := <-pendingResponse.promise
+
+	if promiseCompleted {
 		if replyEvent.Kind() == MK_ERROR {
 			__payload := new(errorEventPayload)
 			replyEvent.Payload(__payload)
@@ -111,7 +121,8 @@ func (pending *PendingResponse[T]) Await() (replyEvent ReplyEvent, payload T, e 
 			e = replyEvent.Payload(&payload)
 		}
 	} else {
-		e = errors.New("SomethingWentWrong")
+		// TODO refactoring
+		e = SomethingWentWrong
 	}
 	return replyEvent, payload, e
 }
@@ -122,12 +133,25 @@ func Call[O, I any](
 	payload I,
 ) *PendingResponse[O] {
 	callEvent := NewCallEvent[I](features, payload)
-	// TODO cancellation
 	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(callEvent.ID(), DEFAULT_TIMEOUT)
-	pendingResponse := newPendingResponse[O](replyEventPromise, cancelPromise)
+
+	cancelCallEvent := func() {
+		cancelEvent := newCancelEvent(callEvent)
+		e := session.peer.Send(cancelEvent)
+		if e == nil {
+			cancelPromise()
+		} else {
+			log.Printf(
+				"[session] failed to send cancel event (ID=%s event.ID=%s)", session.ID(), callEvent.ID(),
+			)
+		}
+	}
+
+	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 	e := session.peer.Send(callEvent)
+	// TODO refactoring
 	if e != nil {
-		pendingResponse.Cancel()
+		cancelPromise()
 	}
 	return pendingResponse
 }
@@ -154,8 +178,9 @@ func NewRemoteGenerator[O, I any](
 
 func (generator *remoteGenerator[T]) Next(timeout time.Duration) (response ReplyEvent, outPayload T, e error) {
 	if generator.done {
-		panic("GeneratorExit")
+		panic("generator exit")
 	}
+
 	response, outPayload, e = generator.lastPendingResponse.Await()
 	if response.Kind() != MK_YIELD {
 		generator.done = true
@@ -188,7 +213,7 @@ func Yield[I any](
 		if done {
 			return nextEvent, nil
 		}
-		e = errors.New("TimedOut")
+		e = TimedOut
 	}
 	return nil, e
 }

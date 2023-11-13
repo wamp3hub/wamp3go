@@ -41,7 +41,7 @@ func main() {
 		},
 	)
 	if e == nil {
-		fmt.Printf("registration ID=%s\n", registration.ID)
+		fmt.Printf("register success ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}

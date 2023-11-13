@@ -12,22 +12,28 @@ type Completable[T any] func(T)
 type Cancellable func()
 
 func NewPromise[T any](timeout time.Duration) (Promise[T], Completable[T], Cancellable) {
-	instance := make(chan T, 1)
+	channel := make(chan T, 1)
 
 	once := new(sync.Once)
-	cancel := func() { close(instance) }
+
+	cancel := func() {
+		closeChannel := func() {
+			close(channel)
+		}
+		once.Do(closeChannel)
+	}
 
 	complete := func(value T) {
-		instance <- value
-		once.Do(cancel)
+		channel <- value
+		cancel()
 	}
 
 	await := func() {
 		<-time.After(timeout)
-		once.Do(cancel)
+		cancel()
 	}
 
 	go await()
 
-	return instance, complete, cancel
+	return channel, complete, cancel
 }
