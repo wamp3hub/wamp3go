@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"sync"
 
@@ -10,13 +11,17 @@ import (
 )
 
 func main() {
+	unixPath := flag.String("path", "", "unix socket path")
+	flag.Parse()
+
+	if len(*unixPath) == 0 {
+		panic("unix socket path required")
+	}
+
 	wg := new(sync.WaitGroup)
 	wg.Add(2)
 
-	session, e := wampTransports.UnixJoin(
-		"/tmp/wamp3rd-cl5nauugnhao1tnnc6i0.socket",
-		wampSerializers.DefaultSerializer,
-	)
+	session, e := wampTransports.UnixJoin(*unixPath, wampSerializers.DefaultSerializer)
 	if e == nil {
 		fmt.Printf("WAMP Join Success session.ID=%s\n", session.ID())
 	} else {
@@ -31,6 +36,7 @@ func main() {
 	}
 
 	wamp.Subscribe(session, "example.echo", &wamp.SubscribeOptions{}, onEcho)
+
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "Hello, WAMP!")
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "How are you?")
 

@@ -36,11 +36,7 @@ func main() {
 			e := callEvent.Payload(&n)
 			if e == nil {
 				for i := n; i > 0; i-- {
-					source, e = wamp.Yield(source, i)
-					if e != nil {
-						fmt.Printf("YieldError %s", e)
-						break
-					}
+					source, _ = wamp.Yield(source, i)
 				}
 				return wamp.NewReplyEvent(source, 0)
 			}
@@ -48,7 +44,7 @@ func main() {
 		},
 	)
 	if e == nil {
-		fmt.Printf("registration ID=%s\n", registration.ID)
+		fmt.Printf("register success ID=%s\n", registration.ID)
 	} else {
 		panic("RegisterError")
 	}

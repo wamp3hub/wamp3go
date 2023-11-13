@@ -8,6 +8,12 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
+var (
+	ConnectionLost = errors.New("ConnectionLost")
+	TimedOut = errors.New("TimedOut")
+	SomethingWentWrong = errors.New("SomethingWentWrong")
+)
+
 type Serializer interface {
 	Code() string
 	Encode(Event) ([]byte, error)
@@ -22,12 +28,14 @@ type Transport interface {
 
 type Peer struct {
 	ID                           string
+	connectionLost               bool
 	Alive                        chan struct{}
 	writeMutex                   *sync.Mutex
 	Transport                    Transport
-	PendingAcceptEvents          wampShared.PendingMap[AcceptEvent]
-	PendingReplyEvents           wampShared.PendingMap[ReplyEvent]
-	PendingNextEvents            wampShared.PendingMap[NextEvent]
+	PendingAcceptEvents          *wampShared.PendingMap[AcceptEvent]
+	PendingReplyEvents           *wampShared.PendingMap[ReplyEvent]
+	PendingCancelEvents          *wampShared.PendingMap[CancelEvent]
+	PendingNextEvents            *wampShared.PendingMap[NextEvent]
 	producePublishEvent          wampShared.Producible[PublishEvent]
 	ConsumeIncomingPublishEvents wampShared.Consumable[PublishEvent]
 	closePublishEvents           wampShared.Closeable
@@ -36,7 +44,7 @@ type Peer struct {
 	closeCallEvents              wampShared.Closeable
 }
 
-func (peer *Peer) safe_send(event Event) error {
+func (peer *Peer) safeSend(event Event) error {
 	// prevent concurrent writes
 	peer.writeMutex.Lock()
 	e := peer.Transport.Write(event)
@@ -46,18 +54,22 @@ func (peer *Peer) safe_send(event Event) error {
 
 func (peer *Peer) acknowledge(source Event) error {
 	acceptEvent := newAcceptEvent(source)
-	e := peer.safe_send(acceptEvent)
+	e := peer.safeSend(acceptEvent)
 	return e
 }
 
 func (peer *Peer) Send(event Event) error {
+	if peer.connectionLost {
+		return ConnectionLost
+	}
 	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
-	peer.safe_send(event)
+	// TODO retry
+	peer.safeSend(event)
 	_, done := <-acceptEventPromise
 	if done {
 		return nil
 	}
-	return errors.New("TimedOut")
+	return TimedOut
 }
 
 func (peer *Peer) Close() error {
@@ -73,11 +85,13 @@ func newPeer(
 	consumeCallEvents, produceCallEvent, closeCallEvents := wampShared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
+		false,
 		make(chan struct{}),
 		new(sync.Mutex),
 		transport,
 		wampShared.NewPendingMap[AcceptEvent](),
 		wampShared.NewPendingMap[ReplyEvent](),
+		wampShared.NewPendingMap[CancelEvent](),
 		wampShared.NewPendingMap[NextEvent](),
 		producePublishEvent,
 		consumePublishEvents,
@@ -93,9 +107,14 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 
 	for {
 		event, e := peer.Transport.Read()
-		if e != nil {
-			log.Printf("[peer] transport error %e (ID=%s)", e, peer.ID)
+		if e == nil {
+			log.Printf("[peer] new event (ID=%s)", peer.ID)
+		} else if e == ConnectionLost {
+			log.Printf("[peer] connection lost (ID=%s)", peer.ID)
 			break
+		} else {
+			log.Printf("[peer] transport error %s (ID=%s)", e, peer.ID)
+			continue
 		}
 
 		event.setPeer(peer)
@@ -106,32 +125,40 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 			e = peer.PendingAcceptEvents.Complete(features.SourceID, event)
 		case ReplyEvent:
 			features := event.Features()
-			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
-			if e == nil {
-				e = peer.acknowledge(event)
-			}
-		case NextEvent:
-			features := event.Features()
-			e = peer.PendingNextEvents.Complete(features.YieldID, event)
-			if e == nil {
-				e = peer.acknowledge(event)
-			}
+			e = errors.Join(
+				peer.acknowledge(event),
+				peer.PendingReplyEvents.Complete(features.InvocationID, event),
+			)
 		case PublishEvent:
 			peer.producePublishEvent(event)
 			e = peer.acknowledge(event)
 		case CallEvent:
 			peer.produceCallEvent(event)
 			e = peer.acknowledge(event)
+		case NextEvent:
+			features := event.Features()
+			e = errors.Join(
+				peer.acknowledge(event),
+				peer.PendingNextEvents.Complete(features.YieldID, event),
+			)
+		case CancelEvent:
+			features := event.Features()
+			e = errors.Join(
+				peer.acknowledge(event),
+				peer.PendingCancelEvents.Complete(features.InvocationID, event),
+			)
 		}
 
-		if e != nil {
-			log.Printf("[peer] listener error %e (ID=%s)", e, peer.ID)
+		if e == nil {
+			log.Printf("[peer] handle event success (ID=%s)", peer.ID)
+		} else {
+			log.Printf("[peer] listening error %s (ID=%s)", e, peer.ID)
 		}
 	}
 
+	peer.connectionLost = true
 	peer.closePublishEvents()
 	peer.closeCallEvents()
-
 	close(peer.Alive)
 }
 

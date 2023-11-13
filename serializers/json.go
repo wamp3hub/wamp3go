@@ -72,6 +72,14 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		}
 		message := jsonNextMessage{event.ID(), event.Kind(), event.Features()}
 		return json.Marshal(message)
+	case wamp.CancelEvent:
+		type jsonCancelMessage struct {
+			ID       string              `json:"ID"`
+			Kind     wamp.MessageKind    `json:"kind"`
+			Features *wamp.ReplyFeatures `json:"features"`
+		}
+		message := jsonCancelMessage{event.ID(), event.Kind(), event.Features()}
+		return json.Marshal(message)
 	}
 	return nil, errors.New("InvalidEvent")
 }
@@ -134,6 +142,15 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			message := new(jsonNextMessage)
 			e = json.Unmarshal(v, &message)
 			event = wamp.MakeNextEvent(message.ID, message.Features)
+		case wamp.MK_CANCEL:
+			type jsonCancelMessage struct {
+				ID       string              `json:"ID"`
+				Kind     wamp.MessageKind    `json:"kind"`
+				Features *wamp.ReplyFeatures `json:"features"`
+			}
+			message := new(jsonCancelMessage)
+			e = json.Unmarshal(v, &message)
+			event = wamp.MakeCancelEvent(message.ID, message.Features)
 		default:
 			e = errors.New("InvalidEvent")
 		}

@@ -1,6 +1,7 @@
 package wampTransports
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/gorilla/websocket"
@@ -42,7 +43,7 @@ func (transport *wsTransport) Read() (wamp.Event, error) {
 			return event, nil
 		}
 	}
-	return nil, e
+	return nil, wamp.ConnectionLost
 }
 
 func WebsocketConnect(
@@ -72,12 +73,19 @@ func WebsocketJoin(
 		&wampInterview.Payload{Credentials: credentials},
 	)
 	if e == nil {
-		wsAddress := "ws://" + address + "/wamp/v1/websocket?ticket=" + payload.Ticket
+		protocol := "ws"
+		if secure {
+			protocol = "wss"
+		}
+		wsAddress := fmt.Sprintf(
+			"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
+			protocol, address, payload.Ticket, serializer.Code(),
+		)
 		transport, e := WebsocketConnect(wsAddress, serializer)
 		if e == nil {
 			peer := wamp.SpawnPeer(payload.YourID, transport)
 			session := wamp.NewSession(peer)
-			log.Printf("[http2websocket] peer.ID=%s joined", peer.ID)
+			log.Printf("[http2websocket] peer.ID=%s joined to %s", peer.ID, address)
 			return session, nil
 		}
 		return nil, e

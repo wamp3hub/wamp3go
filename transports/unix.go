@@ -3,6 +3,7 @@ package wampTransports
 import (
 	"bufio"
 	"encoding/json"
+	"log"
 	"net"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -86,10 +87,11 @@ type UnixClientMessage struct {
 }
 
 func UnixConnect(
-	address string,
+	path string,
 	serializer wamp.Serializer,
 ) (wamp.Transport, string, error) {
-	connection, e := net.Dial("unix", address)
+	log.Printf("[unix] dial %s", path)
+	connection, e := net.Dial("unix", path)
 	if e == nil {
 		transport := UnixTransport(serializer, connection)
 		serverMessage := new(UnixServerMessage)
@@ -106,13 +108,15 @@ func UnixConnect(
 }
 
 func UnixJoin(
-	address string,
+	path string,
 	serializer wamp.Serializer,
 ) (*wamp.Session, error) {
-	transport, peerID, e := UnixConnect(address, serializer)
+	log.Printf("[unix] trying to join %s", path)
+	transport, peerID, e := UnixConnect(path, serializer)
 	if e == nil {
 		peer := wamp.SpawnPeer(peerID, transport)
 		session := wamp.NewSession(peer)
+		log.Printf("[unix] peer.ID=%s joined to %s", peer.ID, path)
 		return session, nil
 	}
 	return nil, e
