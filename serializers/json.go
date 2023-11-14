@@ -7,16 +7,16 @@ import (
 	wamp "github.com/wamp3hub/wamp3go"
 )
 
-type jsonPayloadField struct {
-	payload json.RawMessage
+type JSONPayloadField struct {
+	Value json.RawMessage
 }
 
-func (field *jsonPayloadField) Content() any {
-	return field.payload
+func (field *JSONPayloadField) Content() any {
+	return field.Value
 }
 
-func (field *jsonPayloadField) Payload(v any) error {
-	return json.Unmarshal(field.payload, v)
+func (field *JSONPayloadField) Payload(v any) error {
+	return json.Unmarshal(field.Value, v)
 }
 
 type JSONSerializer struct{}
@@ -110,7 +110,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			}
 			message := new(jsonReplyMessage)
 			e = json.Unmarshal(v, &message)
-			event = wamp.MakeReplyEvent(message.ID, message.Kind, message.Features, &jsonPayloadField{message.Payload})
+			event = wamp.MakeReplyEvent(message.ID, message.Kind, message.Features, &JSONPayloadField{message.Payload})
 		case wamp.MK_PUBLISH:
 			type jsonPublishMessage struct {
 				ID       string                `json:"ID"`
@@ -121,7 +121,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			}
 			message := jsonPublishMessage{Route: new(wamp.PublishRoute)}
 			e = json.Unmarshal(v, &message)
-			event = wamp.MakePublishEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
+			event = wamp.MakePublishEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		case wamp.MK_CALL:
 			type jsonCallMessage struct {
 				ID       string             `json:"ID"`
@@ -132,7 +132,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 			}
 			message := jsonCallMessage{Route: new(wamp.CallRoute)}
 			e = json.Unmarshal(v, &message)
-			event = wamp.MakeCallEvent(message.ID, message.Features, &jsonPayloadField{message.Payload}, message.Route)
+			event = wamp.MakeCallEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		case wamp.MK_NEXT:
 			type jsonNextMessage struct {
 				ID       string             `json:"ID"`

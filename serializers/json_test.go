@@ -1,6 +1,7 @@
 package wampSerializers_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -32,7 +33,13 @@ func testAcceptEventSerializer(t *testing.T, serializer wamp.Serializer) {
 func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedPayload := "test"
 	expectedFeatures := wamp.PublishFeatures{URI: "wamp.test", Include: []string{}, Exclude: []string{wampShared.NewID()}}
-	event := wamp.NewPublishEvent(&expectedFeatures, expectedPayload)
+	rawPayload, _ := json.Marshal(expectedPayload)
+	event := wamp.MakePublishEvent(
+		wampShared.NewID(),
+		&expectedFeatures,
+		&wampSerializer.JSONPayloadField{rawPayload},
+		nil,
+	)
 	raw, e := serializer.Encode(event)
 	if e != nil {
 		t.Fatal(e)
@@ -60,7 +67,13 @@ func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedPayload := "test"
 	expectedFeatures := wamp.CallFeatures{URI: "wamp.test"}
-	event := wamp.NewCallEvent(&expectedFeatures, expectedPayload)
+	rawPayload, _ := json.Marshal(expectedPayload)
+	event := wamp.MakeCallEvent(
+		wampShared.NewID(),
+		&expectedFeatures,
+		&wampSerializer.JSONPayloadField{rawPayload},
+		nil,
+	)
 	raw, e := serializer.Encode(event)
 	if e != nil {
 		t.Fatal(e)
@@ -86,7 +99,12 @@ func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 }
 
 func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	callEvent := wamp.NewCallEvent(&wamp.CallFeatures{URI: "wamp.test"}, struct{}{})
+	callEvent := wamp.MakeCallEvent(
+		wampShared.NewID(),
+		&wamp.CallFeatures{URI: "wamp.test"},
+		&wampSerializer.JSONPayloadField{nil},
+		nil,
+	)
 	expectedPayload := "test"
 	event := wamp.NewReplyEvent(callEvent, expectedPayload)
 	raw, e := serializer.Encode(event)

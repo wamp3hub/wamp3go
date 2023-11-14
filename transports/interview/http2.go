@@ -23,6 +23,15 @@ type SuccessPayload struct {
 	Ticket   string `json:"ticket"`
 }
 
+func MakeJSONBuffer(body any) (*bytes.Buffer, error) {
+	bodyBytes, e := json.Marshal(body)
+	if e == nil {
+		buffer := bytes.NewBuffer(bodyBytes)
+		return buffer, nil
+	}
+	return nil, e
+}
+
 func ReadJSONBody(body io.ReadCloser, v any) error {
 	bodyBytes, e := io.ReadAll(body)
 	if e == nil {
@@ -39,15 +48,14 @@ func HTTP2Interview(address string, secure bool, requestPayload *Payload) (*Succ
 	}
 	url := fmt.Sprintf("%s://%s/wamp/v1/interview", protocol, address)
 
-	requestBodyBytes, e := json.Marshal(requestPayload)
+	requestBody, e := MakeJSONBuffer(requestPayload)
 	if e != nil {
-		return nil, errors.Join(errors.New("failed to marshal request payload"), e)
+		return nil, errors.Join(e, errors.New("failed to marshal request payload"))
 	}
-	requestBody := bytes.NewBuffer(requestBodyBytes)
 
 	response, e := http.Post(url, "application/json", requestBody)
 	if e != nil {
-		return nil, errors.Join(errors.New("failed to send HTTP request"), e)
+		return nil, errors.Join(e, errors.New("failed to send HTTP request"))
 	}
 
 	if response.StatusCode == 200 {

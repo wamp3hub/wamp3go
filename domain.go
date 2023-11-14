@@ -3,6 +3,7 @@ package wamp
 import (
 	"errors"
 	"strings"
+	"time"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
@@ -10,14 +11,15 @@ import (
 type MessageKind int8
 
 const (
-	MK_ACCEPT  MessageKind = 0
+	MK_CALL    MessageKind = 127
+	MK_CANCEL              = 126
+	MK_NEXT                = 125
+	MK_STOP                = 124
 	MK_PUBLISH             = 1
-	MK_CALL                = 127
-	MK_NEXT                = 126
-	MK_REPLY               = -127
-	MK_CANCEL              = -126
+	MK_ACCEPT              = 0
 	MK_YIELD               = -125
-	MK_ERROR               = -124
+	MK_ERROR               = -126
+	MK_REPLY               = -127
 )
 
 type messageProto[F any] struct {
@@ -53,17 +55,17 @@ type messagePayload interface {
 }
 
 type messagePayloadField[T any] struct {
-	payload T
+	value T
 }
 
 func (field *messagePayloadField[T]) Content() any {
-	return field.payload
+	return field.value
 }
 
 func (field *messagePayloadField[T]) Payload(__v any) error {
 	v, ok := __v.(*T)
 	if ok {
-		*v = field.payload
+		*v = field.value
 		return nil
 	}
 	return errors.New("InvalidPayload")
@@ -140,7 +142,7 @@ func MakePublishEvent(
 	}
 }
 
-func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
+func newPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
 		wampShared.NewID(),
 		features,
@@ -150,7 +152,8 @@ func NewPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 }
 
 type CallFeatures struct {
-	URI string `json:"URI"`
+	URI     string        `json:"URI"`
+	Timeout time.Duration `json:"timeout"`
 }
 
 type CallRoute struct {
@@ -185,7 +188,7 @@ func MakeCallEvent(
 	}
 }
 
-func NewCallEvent[T any](features *CallFeatures, data T) CallEvent {
+func newCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
 		wampShared.NewID(),
 		features,

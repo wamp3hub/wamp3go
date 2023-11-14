@@ -76,7 +76,7 @@ func Publish[I any](
 	features *PublishFeatures,
 	payload I,
 ) error {
-	publishEvent := NewPublishEvent(features, payload)
+	publishEvent := newPublishEvent(features, payload)
 	e := session.peer.Send(publishEvent)
 	return e
 }
@@ -121,8 +121,7 @@ func (pendingResponse *PendingResponse[T]) Await() (replyEvent ReplyEvent, paylo
 			e = replyEvent.Payload(&payload)
 		}
 	} else {
-		// TODO refactoring
-		e = SomethingWentWrong
+		e = TimedOut
 	}
 	return replyEvent, payload, e
 }
@@ -131,9 +130,16 @@ func Call[O, I any](
 	session *Session,
 	features *CallFeatures,
 	payload I,
-) *PendingResponse[O] {
-	callEvent := NewCallEvent[I](features, payload)
-	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(callEvent.ID(), DEFAULT_TIMEOUT)
+) (*PendingResponse[O], error) {
+	if features.Timeout == 0 {
+		features.Timeout = DEFAULT_TIMEOUT
+	}
+
+	callEvent := newCallEvent[I](features, payload)
+	replyEventPromise, cancelPromise := session.peer.PendingReplyEvents.New(
+		callEvent.ID(),
+		time.Duration(features.Timeout),
+	)
 
 	cancelCallEvent := func() {
 		cancelEvent := newCancelEvent(callEvent)
@@ -149,11 +155,10 @@ func Call[O, I any](
 
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 	e := session.peer.Send(callEvent)
-	// TODO refactoring
-	if e != nil {
-		cancelPromise()
+	if e == nil {
+		return pendingResponse, nil
 	}
-	return pendingResponse
+	return nil, e
 }
 
 type remoteGenerator[T any] struct {
@@ -170,13 +175,18 @@ func NewRemoteGenerator[O, I any](
 	session *Session,
 	callFeatures *CallFeatures,
 	payload I,
-) *remoteGenerator[O] {
-	pendingResponse := Call[O](session, callFeatures, payload)
-	generator := remoteGenerator[O]{false, session.peer, pendingResponse}
-	return &generator
+) (*remoteGenerator[O], error) {
+	pendingResponse, e := Call[O](session, callFeatures, payload)
+	if e == nil {
+		generator := remoteGenerator[O]{false, session.peer, pendingResponse}
+		return &generator, nil
+	}
+	return nil, e
 }
 
-func (generator *remoteGenerator[T]) Next(timeout time.Duration) (response ReplyEvent, outPayload T, e error) {
+func (generator *remoteGenerator[T]) Next(
+	timeout time.Duration,
+) (response ReplyEvent, outPayload T, e error) {
 	if generator.done {
 		panic("generator exit")
 	}
@@ -186,8 +196,8 @@ func (generator *remoteGenerator[T]) Next(timeout time.Duration) (response Reply
 		generator.done = true
 		return response, outPayload, e
 	}
+
 	nextEvent := newNextEvent(response)
-	// TODO cancellation
 	replyEventPromise, cancelPromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
 	generator.lastPendingResponse = newPendingResponse[T](replyEventPromise, cancelPromise)
 	e = generator.peer.Send(nextEvent)
@@ -196,18 +206,18 @@ func (generator *remoteGenerator[T]) Next(timeout time.Duration) (response Reply
 
 func (generator *remoteGenerator[T]) Stop() error {
 	generator.done = true
-	// TODO cancellation
+	// TODO stop event
 	return nil
 }
 
 func Yield[I any](
 	source Event,
 	inPayload I,
-) (nextEvent NextEvent, e error) {
+) (NextEvent, error) {
 	yieldEvent := newYieldEvent(source, inPayload)
 	peer := source.getPeer()
 	nextEventPromise, _ := peer.PendingNextEvents.New(yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-	e = peer.Send(yieldEvent)
+	e := peer.Send(yieldEvent)
 	if e == nil {
 		nextEvent, done := <-nextEventPromise
 		if done {
@@ -229,11 +239,15 @@ func Subscribe(
 	options *SubscribeOptions,
 	endpoint PublishEndpoint,
 ) (*Subscription, error) {
-	pendingResponse := Call[Subscription](
+	pendingResponse, e := Call[Subscription](
 		session,
-		&CallFeatures{"wamp.subscribe"},
+		&CallFeatures{URI: "wamp.router.subscribe"},
 		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
+	if e != nil {
+		return nil, errors.Join(errors.New("during subscribe"), e)
+	}
+
 	_, subscription, e := pendingResponse.Await()
 	if e == nil {
 		session.Subscriptions[subscription.ID] = endpoint
@@ -248,11 +262,15 @@ func Register(
 	options *RegisterOptions,
 	endpoint CallEndpoint,
 ) (*Registration, error) {
-	pendingResponse := Call[Registration](
+	pendingResponse, e := Call[Registration](
 		session,
-		&CallFeatures{"wamp.register"},
+		&CallFeatures{URI: "wamp.router.register"},
 		NewResourcePayload[RegisterOptions]{uri, options},
 	)
+	if e != nil {
+		return nil, errors.Join(errors.New("during register"), e)
+	}
+
 	_, registration, e := pendingResponse.Await()
 	if e == nil {
 		session.Registrations[registration.ID] = endpoint
@@ -265,10 +283,14 @@ func Unsubscribe(
 	session *Session,
 	subscriptionID string,
 ) error {
-	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unsubscribe"}, subscriptionID)
-	_, _, e := pendingResponse.Await()
+	pendingResponse, e := Call[struct{}](
+		session,
+		&CallFeatures{URI: "wamp.router.unsubscribe"},
+		subscriptionID,
+	)
 	if e == nil {
 		delete(session.Subscriptions, subscriptionID)
+		_, _, e = pendingResponse.Await()
 	}
 	return e
 }
@@ -277,10 +299,14 @@ func Unregister(
 	session *Session,
 	registrationID string,
 ) error {
-	pendingResponse := Call[struct{}](session, &CallFeatures{"wamp.unregister"}, registrationID)
-	_, _, e := pendingResponse.Await()
+	pendingResponse, e := Call[struct{}](
+		session,
+		&CallFeatures{URI: "wamp.router.unregister"},
+		registrationID,
+	)
 	if e == nil {
 		delete(session.Registrations, registrationID)
+		_, _, e = pendingResponse.Await()
 	}
 	return e
 }

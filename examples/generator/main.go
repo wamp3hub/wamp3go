@@ -46,10 +46,18 @@ func main() {
 	if e == nil {
 		fmt.Printf("register success ID=%s\n", registration.ID)
 	} else {
-		panic("RegisterError")
+		panic("register error")
 	}
 
-	generator := wamp.NewRemoteGenerator[int](session, &wamp.CallFeatures{URI: "example.reverse"}, 99)
+	generator, e := wamp.NewRemoteGenerator[int](
+		session,
+		&wamp.CallFeatures{URI: "example.reverse"},
+		99,
+	)
+	if e == nil {
+		panic("generator create error")
+	}
+
 	for generator.Active() {
 		fmt.Print("call(example.reversed): ")
 		_, v, e := generator.Next(wamp.DEFAULT_TIMEOUT)

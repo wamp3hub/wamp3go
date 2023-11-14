@@ -11,7 +11,6 @@ import (
 var (
 	ConnectionLost = errors.New("ConnectionLost")
 	TimedOut = errors.New("TimedOut")
-	SomethingWentWrong = errors.New("SomethingWentWrong")
 )
 
 type Serializer interface {
@@ -126,8 +125,8 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 		case ReplyEvent:
 			features := event.Features()
 			e = errors.Join(
-				peer.acknowledge(event),
 				peer.PendingReplyEvents.Complete(features.InvocationID, event),
+				peer.acknowledge(event),
 			)
 		case PublishEvent:
 			peer.producePublishEvent(event)
@@ -138,19 +137,19 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 		case NextEvent:
 			features := event.Features()
 			e = errors.Join(
-				peer.acknowledge(event),
 				peer.PendingNextEvents.Complete(features.YieldID, event),
+				peer.acknowledge(event),
 			)
 		case CancelEvent:
 			features := event.Features()
 			e = errors.Join(
-				peer.acknowledge(event),
 				peer.PendingCancelEvents.Complete(features.InvocationID, event),
+				peer.acknowledge(event),
 			)
 		}
 
 		if e == nil {
-			log.Printf("[peer] handle event success (ID=%s)", peer.ID)
+			log.Printf("[peer] event success (ID=%s)", peer.ID)
 		} else {
 			log.Printf("[peer] listening error %s (ID=%s)", e, peer.ID)
 		}

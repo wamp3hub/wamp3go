@@ -43,10 +43,18 @@ func main() {
 	if e == nil {
 		fmt.Printf("register success ID=%s\n", registration.ID)
 	} else {
-		panic("RegisterError")
+		panic("register error")
 	}
 
-	pendingResponse := wamp.Call[string](session, &wamp.CallFeatures{URI: "example.greeting"}, "WAMP")
+	pendingResponse, e := wamp.Call[string](
+		session,
+		&wamp.CallFeatures{URI: "example.greeting"},
+		"WAMP",
+	)
+	if e == nil {
+		panic("call error")
+	}
+
 	_, v, e := pendingResponse.Await()
 	if e == nil {
 		fmt.Printf("call(example.greeting) %s\n", v)
