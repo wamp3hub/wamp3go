@@ -63,7 +63,10 @@ func (peer *Peer) Send(event Event) error {
 	}
 	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
 	// TODO retry
-	peer.safeSend(event)
+	e := peer.safeSend(event)
+	if e == nil {
+		log.Printf("[peer] event sent (ID=%s event.Kind=%d)", peer.ID, event.Kind())
+	}
 	_, done := <-acceptEventPromise
 	if done {
 		return nil
@@ -107,7 +110,7 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 	for {
 		event, e := peer.Transport.Read()
 		if e == nil {
-			log.Printf("[peer] new event (ID=%s)", peer.ID)
+			log.Printf("[peer] new event (ID=%s event.Kind=%d)", peer.ID, event.Kind())
 		} else if e == ConnectionLost {
 			log.Printf("[peer] connection lost (ID=%s)", peer.ID)
 			break

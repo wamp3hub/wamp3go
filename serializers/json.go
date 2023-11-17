@@ -119,8 +119,11 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 				Payload  json.RawMessage       `json:"payload"`
 				Route    *wamp.PublishRoute    `json:"route"`
 			}
-			message := jsonPublishMessage{Route: new(wamp.PublishRoute)}
-			e = json.Unmarshal(v, &message)
+			message := new(jsonPublishMessage)
+			e = json.Unmarshal(v, message)
+			if message.Route == nil {
+				message.Route = new(wamp.PublishRoute)
+			}
 			event = wamp.MakePublishEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		case wamp.MK_CALL:
 			type jsonCallMessage struct {
@@ -130,8 +133,11 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 				Payload  json.RawMessage    `json:"payload"`
 				Route    *wamp.CallRoute    `json:"route"`
 			}
-			message := jsonCallMessage{Route: new(wamp.CallRoute)}
-			e = json.Unmarshal(v, &message)
+			message := new(jsonCallMessage)
+			e = json.Unmarshal(v, message)
+			if message.Route == nil {
+				message.Route = new(wamp.CallRoute)
+			}
 			event = wamp.MakeCallEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		case wamp.MK_NEXT:
 			type jsonNextMessage struct {
@@ -140,7 +146,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 				Features *wamp.NextFeatures `json:"features"`
 			}
 			message := new(jsonNextMessage)
-			e = json.Unmarshal(v, &message)
+			e = json.Unmarshal(v, message)
 			event = wamp.MakeNextEvent(message.ID, message.Features)
 		case wamp.MK_CANCEL:
 			type jsonCancelMessage struct {
@@ -149,7 +155,7 @@ func (JSONSerializer) Decode(v []byte) (event wamp.Event, e error) {
 				Features *wamp.ReplyFeatures `json:"features"`
 			}
 			message := new(jsonCancelMessage)
-			e = json.Unmarshal(v, &message)
+			e = json.Unmarshal(v, message)
 			event = wamp.MakeCancelEvent(message.ID, message.Features)
 		default:
 			e = errors.New("InvalidEvent")

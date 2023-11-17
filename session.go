@@ -205,9 +205,13 @@ func (generator *remoteGenerator[T]) Next(
 }
 
 func (generator *remoteGenerator[T]) Stop() error {
+	if generator.done {
+		panic("generator exit")
+	}
 	generator.done = true
-	// TODO stop event
-	return nil
+	cancelEvent := NewStopEvent(callEvent)
+	e := generator.peer.Send(cancelEvent)
+	return e
 }
 
 func Yield[I any](
@@ -315,6 +319,6 @@ func Leave(
 	session *Session,
 	reason string,
 ) error {
-	// TODO
-	return nil
+	e := session.peer.Close()
+	return e
 }

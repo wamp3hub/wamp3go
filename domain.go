@@ -202,6 +202,25 @@ type ReplyFeatures struct {
 	VisitedRouters []string `json:"visitedRouters"`
 }
 
+type CancelEvent interface {
+	Event
+	Features() *ReplyFeatures
+}
+
+func MakeCancelEvent(
+	id string,
+	features *ReplyFeatures,
+) CancelEvent {
+	type message struct {
+		*messageProto[*ReplyFeatures]
+	}
+	return &message{&messageProto[*ReplyFeatures]{id, MK_CANCEL, features, nil}}
+}
+
+func newCancelEvent(source Event) CancelEvent {
+	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{source.ID(), []string{}})
+}
+
 type ReplyEvent interface {
 	Event
 	Features() *ReplyFeatures
@@ -252,25 +271,6 @@ func newYieldEvent[T any](source Event, data T) YieldEvent {
 	)
 }
 
-type CancelEvent interface {
-	Event
-	Features() *ReplyFeatures
-}
-
-func MakeCancelEvent(
-	id string,
-	features *ReplyFeatures,
-) CancelEvent {
-	type message struct {
-		*messageProto[*ReplyFeatures]
-	}
-	return &message{&messageProto[*ReplyFeatures]{id, MK_CANCEL, features, nil}}
-}
-
-func newCancelEvent(source Event) CancelEvent {
-	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{source.ID(), []string{}})
-}
-
 type NextFeatures struct {
 	YieldID string `json:"yieldID"`
 }
@@ -294,6 +294,12 @@ func newNextEvent(source Event) NextEvent {
 	)
 }
 
+type StopEvent = CancelEvent
+
+func NewStopEvent(generatorID string) StopEvent {
+	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{generatorID, []string{}})
+}
+
 type Resource[T any] struct {
 	ID       string `json:"ID"`
 	URI      string `json:"URI"`
@@ -302,7 +308,7 @@ type Resource[T any] struct {
 }
 
 func (resource *Resource[T]) Native() bool {
-	return strings.HasPrefix(resource.URI, "wamp.")
+	return strings.HasPrefix(resource.URI, "wamp.router.")
 }
 
 type resourceOptions struct {
