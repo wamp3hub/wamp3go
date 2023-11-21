@@ -250,7 +250,7 @@ func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 }
 
 type errorEventPayload struct {
-	Code string `json:"code"`
+	Message string `json:"message"`
 }
 
 func NewErrorEvent(source Event, e error) ReplyEvent {
@@ -272,7 +272,9 @@ func newYieldEvent[T any](source Event, data T) YieldEvent {
 }
 
 type NextFeatures struct {
-	YieldID string `json:"yieldID"`
+	GeneratorID string        `json:"generatorID"`
+	YieldID     string        `json:"yieldID"`
+	Timeout     time.Duration `json:"timeout"`
 }
 
 type NextEvent interface {
@@ -287,11 +289,8 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 	return &message{&messageProto[*NextFeatures]{id, MK_NEXT, features, nil}}
 }
 
-func newNextEvent(source Event) NextEvent {
-	return MakeNextEvent(
-		wampShared.NewID(),
-		&NextFeatures{source.ID()},
-	)
+func newNextEvent(features *NextFeatures) NextEvent {
+	return MakeNextEvent(wampShared.NewID(), features)
 }
 
 type StopEvent = CancelEvent

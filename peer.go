@@ -11,6 +11,8 @@ import (
 var (
 	ConnectionLost = errors.New("ConnectionLost")
 	TimedOut = errors.New("TimedOut")
+	Cancelled = errors.New("Cancelled")
+	InternalError = errors.New("InternalError")
 )
 
 type Serializer interface {

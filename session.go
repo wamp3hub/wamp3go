@@ -103,7 +103,6 @@ func (pendingResponse *PendingResponse[T]) markAsUsed() {
 
 func (pendingResponse *PendingResponse[T]) Cancel() {
 	pendingResponse.markAsUsed()
-
 	pendingResponse.cancelPromise()
 }
 
@@ -116,7 +115,7 @@ func (pendingResponse *PendingResponse[T]) Await() (replyEvent ReplyEvent, paylo
 		if replyEvent.Kind() == MK_ERROR {
 			__payload := new(errorEventPayload)
 			replyEvent.Payload(__payload)
-			e = errors.New(__payload.Code)
+			e = errors.New(__payload.Message)
 		} else {
 			e = replyEvent.Payload(&payload)
 		}
@@ -161,10 +160,15 @@ func Call[O, I any](
 	return nil, e
 }
 
+type NewGeneratorPayload struct {
+	ID string `json:"id"`
+}
+
 type remoteGenerator[T any] struct {
-	done                bool
-	peer                *Peer
-	lastPendingResponse *PendingResponse[T]
+	done        bool
+	ID          string
+	lastYieldID string
+	peer        *Peer
 }
 
 func (generator *remoteGenerator[T]) Active() bool {
@@ -174,12 +178,17 @@ func (generator *remoteGenerator[T]) Active() bool {
 func NewRemoteGenerator[O, I any](
 	session *Session,
 	callFeatures *CallFeatures,
-	payload I,
+	inPayload I,
 ) (*remoteGenerator[O], error) {
-	pendingResponse, e := Call[O](session, callFeatures, payload)
+	pendingResponse, e := Call[NewGeneratorPayload](session, callFeatures, inPayload)
+	if e != nil {
+		return nil, e
+	}
+
+	yieldEvent, generator, e := pendingResponse.Await()
 	if e == nil {
-		generator := remoteGenerator[O]{false, session.peer, pendingResponse}
-		return &generator, nil
+		instance := remoteGenerator[O]{false, generator.ID, yieldEvent.ID(), session.peer}
+		return &instance, nil
 	}
 	return nil, e
 }
@@ -191,16 +200,19 @@ func (generator *remoteGenerator[T]) Next(
 		panic("generator exit")
 	}
 
-	response, outPayload, e = generator.lastPendingResponse.Await()
-	if response.Kind() != MK_YIELD {
-		generator.done = true
-		return response, outPayload, e
-	}
-
-	nextEvent := newNextEvent(response)
+	nextFeatures := NextFeatures{generator.ID, generator.lastYieldID, timeout}
+	nextEvent := newNextEvent(&nextFeatures)
 	replyEventPromise, cancelPromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), timeout)
-	generator.lastPendingResponse = newPendingResponse[T](replyEventPromise, cancelPromise)
+	pendingResponse := newPendingResponse[T](replyEventPromise, cancelPromise)
 	e = generator.peer.Send(nextEvent)
+	if e == nil {
+		response, outPayload, e = pendingResponse.Await()
+		if e == nil && response.Kind() == MK_YIELD {
+			generator.lastYieldID = response.ID()
+		} else {
+			generator.done = true
+		}
+	}
 	return response, outPayload, e
 }
 
@@ -208,9 +220,10 @@ func (generator *remoteGenerator[T]) Stop() error {
 	if generator.done {
 		panic("generator exit")
 	}
+
 	generator.done = true
-	cancelEvent := NewStopEvent(callEvent)
-	e := generator.peer.Send(cancelEvent)
+	stopEvent := NewStopEvent(generator.ID)
+	e := generator.peer.Send(stopEvent)
 	return e
 }
 
@@ -218,18 +231,60 @@ func Yield[I any](
 	source Event,
 	inPayload I,
 ) (NextEvent, error) {
-	yieldEvent := newYieldEvent(source, inPayload)
 	peer := source.getPeer()
-	nextEventPromise, _ := peer.PendingNextEvents.New(yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME)
-	e := peer.Send(yieldEvent)
-	if e == nil {
+
+	callEvent, ok := source.(CallEvent)
+	if ok {
+		generator := NewGeneratorPayload{wampShared.NewID()}
+		yieldEvent := newYieldEvent(callEvent, generator)
+		nextEventPromise, _ := peer.PendingNextEvents.New(
+			yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME,
+		)
+		e := peer.Send(yieldEvent)
+		if e != nil {
+			return nil, e
+		}
+
 		nextEvent, done := <-nextEventPromise
 		if done {
-			return nextEvent, nil
+			source = nextEvent
+		} else {
+			return nil, TimedOut
 		}
-		e = TimedOut
 	}
-	return nil, e
+
+	nextEvent, ok := source.(NextEvent)
+	if !ok {
+		panic("invalid source event")
+	}
+
+	nextFeatures := nextEvent.Features()
+
+	stopEventPromise, cancelStopEventPromise := peer.PendingCancelEvents.New(
+		nextFeatures.GeneratorID, DEFAULT_GENERATOR_LIFETIME,
+	)
+
+	yieldEvent := newYieldEvent(nextEvent, inPayload)
+
+	nextEventPromise, cancelNextEventPromise := peer.PendingNextEvents.New(
+		yieldEvent.ID(), DEFAULT_GENERATOR_LIFETIME,
+	)
+
+	e := peer.Send(yieldEvent)
+	if e != nil {
+		return nil, e
+	}
+
+	select {
+	case <-stopEventPromise:
+		cancelNextEventPromise()
+
+		return nil, Cancelled
+	case nextEvent := <-nextEventPromise:
+		cancelStopEventPromise()
+
+		return nextEvent, nil
+	}
 }
 
 type NewResourcePayload[O any] struct {
@@ -249,7 +304,7 @@ func Subscribe(
 		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
 	if e != nil {
-		return nil, errors.Join(errors.New("during subscribe"), e)
+		return nil, e
 	}
 
 	_, subscription, e := pendingResponse.Await()
@@ -272,7 +327,7 @@ func Register(
 		NewResourcePayload[RegisterOptions]{uri, options},
 	)
 	if e != nil {
-		return nil, errors.Join(errors.New("during register"), e)
+		return nil, e
 	}
 
 	_, registration, e := pendingResponse.Await()
