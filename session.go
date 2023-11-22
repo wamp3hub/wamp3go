@@ -14,8 +14,8 @@ const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 type Session struct {
 	peer          *Peer
-	Subscriptions map[string]PublishEndpoint
-	Registrations map[string]CallEndpoint
+	Subscriptions map[string]*publishEndpoint
+	Registrations map[string]*callEndpoint
 }
 
 func (session *Session) ID() string {
@@ -25,8 +25,8 @@ func (session *Session) ID() string {
 func NewSession(peer *Peer) *Session {
 	session := Session{
 		peer,
-		make(map[string]PublishEndpoint),
-		make(map[string]CallEndpoint),
+		make(map[string]*publishEndpoint),
+		make(map[string]*callEndpoint),
 	}
 
 	session.peer.ConsumeIncomingPublishEvents(
@@ -34,7 +34,7 @@ func NewSession(peer *Peer) *Session {
 			route := publishEvent.Route()
 			endpoint, exists := session.Subscriptions[route.EndpointID]
 			if exists {
-				endpoint(publishEvent)
+				endpoint.execute(publishEvent)
 			} else {
 				log.Printf(
 					"[session] subscription not found (ID=%s route.ID=%s publisher.ID=%s)",
@@ -50,7 +50,9 @@ func NewSession(peer *Peer) *Session {
 			route := callEvent.Route()
 			endpoint, exists := session.Registrations[route.EndpointID]
 			if exists {
-				replyEvent := endpoint(callEvent)
+				// TODO cancellation
+
+				replyEvent := endpoint.execute(callEvent)
 
 				e := session.peer.Send(replyEvent)
 				if e == nil {
@@ -182,6 +184,7 @@ func NewRemoteGenerator[O, I any](
 ) (*remoteGenerator[O], error) {
 	pendingResponse, e := Call[NewGeneratorPayload](session, callFeatures, inPayload)
 	if e != nil {
+		// TODO log
 		return nil, e
 	}
 
@@ -242,6 +245,7 @@ func Yield[I any](
 		)
 		e := peer.Send(yieldEvent)
 		if e != nil {
+			// TODO log
 			return nil, e
 		}
 
@@ -272,6 +276,7 @@ func Yield[I any](
 
 	e := peer.Send(yieldEvent)
 	if e != nil {
+		// TODO log
 		return nil, e
 	}
 
@@ -296,7 +301,7 @@ func Subscribe(
 	session *Session,
 	uri string,
 	options *SubscribeOptions,
-	endpoint PublishEndpoint,
+	procedure PublishProcedure,
 ) (*Subscription, error) {
 	pendingResponse, e := Call[Subscription](
 		session,
@@ -304,11 +309,13 @@ func Subscribe(
 		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
 	if e != nil {
+		// TODO log
 		return nil, e
 	}
 
 	_, subscription, e := pendingResponse.Await()
 	if e == nil {
+		endpoint := NewPublishEndpoint(procedure)
 		session.Subscriptions[subscription.ID] = endpoint
 		return &subscription, nil
 	}
@@ -319,7 +326,7 @@ func Register(
 	session *Session,
 	uri string,
 	options *RegisterOptions,
-	endpoint CallEndpoint,
+	procedure CallProcedure,
 ) (*Registration, error) {
 	pendingResponse, e := Call[Registration](
 		session,
@@ -327,11 +334,13 @@ func Register(
 		NewResourcePayload[RegisterOptions]{uri, options},
 	)
 	if e != nil {
+		// TODO log
 		return nil, e
 	}
 
 	_, registration, e := pendingResponse.Await()
 	if e == nil {
+		endpoint := NewCallEndpoint(procedure)
 		session.Registrations[registration.ID] = endpoint
 		return &registration, nil
 	}

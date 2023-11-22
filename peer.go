@@ -154,9 +154,9 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 		}
 
 		if e == nil {
-			log.Printf("[peer] event success (ID=%s)", peer.ID)
+			log.Printf("[peer] event success (ID=%s Kind=%d)", peer.ID, event.Kind())
 		} else {
-			log.Printf("[peer] listening error %s (ID=%s)", e, peer.ID)
+			log.Printf("[peer] listening error %s (ID=%s Kind=%d)", e, peer.ID, event.Kind())
 		}
 	}
 

@@ -37,7 +37,7 @@ func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	event := wamp.MakePublishEvent(
 		wampShared.NewID(),
 		&expectedFeatures,
-		&wampSerializer.JSONPayloadField{rawPayload},
+		&wampSerializer.PayloadJSONField{rawPayload},
 		nil,
 	)
 	raw, e := serializer.Encode(event)
@@ -71,7 +71,7 @@ func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	event := wamp.MakeCallEvent(
 		wampShared.NewID(),
 		&expectedFeatures,
-		&wampSerializer.JSONPayloadField{rawPayload},
+		&wampSerializer.PayloadJSONField{rawPayload},
 		nil,
 	)
 	raw, e := serializer.Encode(event)
@@ -102,7 +102,7 @@ func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	callEvent := wamp.MakeCallEvent(
 		wampShared.NewID(),
 		&wamp.CallFeatures{URI: "wamp.test"},
-		&wampSerializer.JSONPayloadField{nil},
+		&wampSerializer.PayloadJSONField{nil},
 		nil,
 	)
 	expectedPayload := "test"
