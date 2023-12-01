@@ -40,7 +40,7 @@ func main() {
 				}
 				return wamp.NewReplyEvent(source, 0)
 			}
-			return wamp.NewErrorEvent(source, e)
+			return wamp.GeneratorExit(source)
 		},
 	)
 	if e == nil {
@@ -54,7 +54,8 @@ func main() {
 		&wamp.CallFeatures{URI: "example.reverse"},
 		99,
 	)
-	if e == nil {
+	if e != nil {
+		fmt.Printf("generator create error %s\n", e)
 		panic("generator create error")
 	}
 

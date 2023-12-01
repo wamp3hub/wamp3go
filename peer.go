@@ -9,10 +9,7 @@ import (
 )
 
 var (
-	ConnectionLost = errors.New("ConnectionLost")
-	TimedOut = errors.New("TimedOut")
-	Cancelled = errors.New("Cancelled")
-	InternalError = errors.New("InternalError")
+	ConnectionLostError = errors.New("ConnectionLost")
 )
 
 type Serializer interface {
@@ -28,21 +25,17 @@ type Transport interface {
 }
 
 type Peer struct {
-	ID                           string
-	connectionLost               bool
-	Alive                        chan struct{}
-	writeMutex                   *sync.Mutex
-	Transport                    Transport
-	PendingAcceptEvents          *wampShared.PendingMap[AcceptEvent]
-	PendingReplyEvents           *wampShared.PendingMap[ReplyEvent]
-	PendingCancelEvents          *wampShared.PendingMap[CancelEvent]
-	PendingNextEvents            *wampShared.PendingMap[NextEvent]
-	producePublishEvent          wampShared.Producible[PublishEvent]
-	ConsumeIncomingPublishEvents wampShared.Consumable[PublishEvent]
-	closePublishEvents           wampShared.Closeable
-	produceCallEvent             wampShared.Producible[CallEvent]
-	ConsumeIncomingCallEvents    wampShared.Consumable[CallEvent]
-	closeCallEvents              wampShared.Closeable
+	ID                    string
+	connectionLost        bool
+	Alive                 chan struct{}
+	writeMutex            *sync.Mutex
+	Transport             Transport
+	PendingAcceptEvents   *wampShared.PendingMap[AcceptEvent]
+	PendingReplyEvents    *wampShared.PendingMap[ReplyEvent]
+	PendingCancelEvents   *wampShared.PendingMap[CancelEvent]
+	PendingNextEvents     *wampShared.PendingMap[NextEvent]
+	IncomingPublishEvents *wampShared.ObservableObject[PublishEvent]
+	IncomingCallEvents    *wampShared.ObservableObject[CallEvent]
 }
 
 func (peer *Peer) safeSend(event Event) error {
@@ -61,7 +54,7 @@ func (peer *Peer) acknowledge(source Event) error {
 
 func (peer *Peer) Send(event Event) error {
 	if peer.connectionLost {
-		return ConnectionLost
+		return ConnectionLostError
 	}
 	acceptEventPromise, _ := peer.PendingAcceptEvents.New(event.ID(), DEFAULT_TIMEOUT)
 	// TODO retry
@@ -73,7 +66,7 @@ func (peer *Peer) Send(event Event) error {
 	if done {
 		return nil
 	}
-	return TimedOut
+	return TimedOutError
 }
 
 func (peer *Peer) Close() error {
@@ -85,8 +78,6 @@ func newPeer(
 	ID string,
 	transport Transport,
 ) *Peer {
-	consumePublishEvents, producePublishEvent, closePublishEvents := wampShared.NewStream[PublishEvent]()
-	consumeCallEvents, produceCallEvent, closeCallEvents := wampShared.NewStream[CallEvent]()
 	return &Peer{
 		ID,
 		false,
@@ -97,12 +88,8 @@ func newPeer(
 		wampShared.NewPendingMap[ReplyEvent](),
 		wampShared.NewPendingMap[CancelEvent](),
 		wampShared.NewPendingMap[NextEvent](),
-		producePublishEvent,
-		consumePublishEvents,
-		closePublishEvents,
-		produceCallEvent,
-		consumeCallEvents,
-		closeCallEvents,
+		wampShared.NewObservable[PublishEvent](),
+		wampShared.NewObservable[CallEvent](),
 	}
 }
 
@@ -113,7 +100,7 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 		event, e := peer.Transport.Read()
 		if e == nil {
 			log.Printf("[peer] new event (ID=%s event.Kind=%d)", peer.ID, event.Kind())
-		} else if e == ConnectionLost {
+		} else if e == ConnectionLostError {
 			log.Printf("[peer] connection lost (ID=%s)", peer.ID)
 			break
 		} else {
@@ -134,10 +121,10 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 				peer.acknowledge(event),
 			)
 		case PublishEvent:
-			peer.producePublishEvent(event)
+			peer.IncomingPublishEvents.Next(event)
 			e = peer.acknowledge(event)
 		case CallEvent:
-			peer.produceCallEvent(event)
+			peer.IncomingCallEvents.Next(event)
 			e = peer.acknowledge(event)
 		case NextEvent:
 			features := event.Features()
@@ -160,9 +147,9 @@ func listenEvents(wg *sync.WaitGroup, peer *Peer) {
 		}
 	}
 
+	peer.IncomingPublishEvents.Complete()
+	peer.IncomingCallEvents.Complete()
 	peer.connectionLost = true
-	peer.closePublishEvents()
-	peer.closeCallEvents()
 	close(peer.Alive)
 }
 

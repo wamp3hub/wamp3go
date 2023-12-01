@@ -7,25 +7,25 @@ import (
 )
 
 type PendingMap[T any] struct {
-	safeMap map[string]Completable[T]
-	mutex *sync.RWMutex
+	safeMap map[string]CompletePromise[T]
+	mutex   *sync.RWMutex
 }
 
 func NewPendingMap[T any]() *PendingMap[T] {
 	return &PendingMap[T]{
-		make(map[string]Completable[T]),
+		make(map[string]CompletePromise[T]),
 		new(sync.RWMutex),
 	}
 }
 
-func (pendingMap PendingMap[T]) safeGet(key string) (Completable[T], bool) {
+func (pendingMap PendingMap[T]) safeGet(key string) (CompletePromise[T], bool) {
 	pendingMap.mutex.RLock()
 	defer pendingMap.mutex.RUnlock()
 	value, exists := pendingMap.safeMap[key]
 	return value, exists
 }
 
-func (pendingMap PendingMap[T]) safeSet(key string, value Completable[T]) {
+func (pendingMap PendingMap[T]) safeSet(key string, value CompletePromise[T]) {
 	pendingMap.mutex.Lock()
 	pendingMap.safeMap[key] = value
 	pendingMap.mutex.Unlock()
@@ -40,7 +40,7 @@ func (pendingMap PendingMap[T]) safeDelete(key string) {
 func (pendingMap PendingMap[T]) New(
 	key string,
 	timeout time.Duration,
-) (Promise[T], Cancellable) {
+) (Promise[T], CancelPromise) {
 	_, exists := pendingMap.safeGet(key)
 	if exists {
 		// Instead of using panic when a pending already exists, consider returning an error.

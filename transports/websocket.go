@@ -43,7 +43,7 @@ func (transport *wsTransport) Read() (wamp.Event, error) {
 			return event, nil
 		}
 	}
-	return nil, wamp.ConnectionLost
+	return nil, wamp.ConnectionLostError
 }
 
 func WebsocketConnect(

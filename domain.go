@@ -252,7 +252,9 @@ type errorEventPayload struct {
 	Message string `json:"message"`
 }
 
-func NewErrorEvent(source Event, e error) ReplyEvent {
+type ErrorEvent = ReplyEvent
+
+func NewErrorEvent(source Event, e error) ErrorEvent {
 	errorMessage := e.Error()
 	payload := errorEventPayload{errorMessage}
 	data := payloadEventField[errorEventPayload]{payload}
@@ -268,6 +270,16 @@ func newYieldEvent[T any](source Event, data T) YieldEvent {
 		&ReplyFeatures{source.ID(), []string{}},
 		&payloadEventField[T]{data},
 	)
+}
+
+type StopEvent = CancelEvent
+
+func NewStopEvent(generatorID string) StopEvent {
+	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{generatorID, []string{}})
+}
+
+func GeneratorExit(source Event) ErrorEvent {
+	return NewErrorEvent(source, errors.New("GeneratorExit"))
 }
 
 type NextFeatures struct {
@@ -290,12 +302,6 @@ func MakeNextEvent(id string, features *NextFeatures) NextEvent {
 
 func newNextEvent(features *NextFeatures) NextEvent {
 	return MakeNextEvent(wampShared.NewID(), features)
-}
-
-type StopEvent = CancelEvent
-
-func NewStopEvent(generatorID string) StopEvent {
-	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{generatorID, []string{}})
 }
 
 type Resource[T any] struct {

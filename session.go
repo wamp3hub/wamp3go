@@ -8,14 +8,20 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
+var (
+	TimedOutError      = errors.New("TimedOut")
+	CancelledError     = errors.New("Cancelled")
+	SomethingWentWrong = errors.New("SomethingWentWrong")
+)
+
 const DEFAULT_TIMEOUT = time.Minute
 
 const DEFAULT_GENERATOR_LIFETIME = time.Hour
 
 type Session struct {
 	peer          *Peer
-	Subscriptions map[string]*publishEndpoint
-	Registrations map[string]*callEndpoint
+	Subscriptions map[string]publishEventEndpoint
+	Registrations map[string]callEventEndpoint
 }
 
 func (session *Session) ID() string {
@@ -25,16 +31,16 @@ func (session *Session) ID() string {
 func NewSession(peer *Peer) *Session {
 	session := Session{
 		peer,
-		make(map[string]*publishEndpoint),
-		make(map[string]*callEndpoint),
+		make(map[string]publishEventEndpoint),
+		make(map[string]callEventEndpoint),
 	}
 
-	session.peer.ConsumeIncomingPublishEvents(
+	session.peer.IncomingPublishEvents.Observe(
 		func(publishEvent PublishEvent) {
 			route := publishEvent.Route()
 			endpoint, exists := session.Subscriptions[route.EndpointID]
 			if exists {
-				endpoint.execute(publishEvent)
+				endpoint(publishEvent)
 			} else {
 				log.Printf(
 					"[session] subscription not found (ID=%s route.ID=%s publisher.ID=%s)",
@@ -45,14 +51,14 @@ func NewSession(peer *Peer) *Session {
 		func() {},
 	)
 
-	session.peer.ConsumeIncomingCallEvents(
+	session.peer.IncomingCallEvents.Observe(
 		func(callEvent CallEvent) {
 			route := callEvent.Route()
 			endpoint, exists := session.Registrations[route.EndpointID]
 			if exists {
 				// TODO cancellation
 
-				replyEvent := endpoint.execute(callEvent)
+				replyEvent := endpoint(callEvent)
 
 				e := session.peer.Send(replyEvent)
 				if e == nil {
@@ -86,12 +92,12 @@ func Publish[I any](
 type PendingResponse[T any] struct {
 	used          bool
 	promise       wampShared.Promise[ReplyEvent]
-	cancelPromise wampShared.Cancellable
+	cancelPromise wampShared.CancelPromise
 }
 
 func newPendingResponse[T any](
 	promise wampShared.Promise[ReplyEvent],
-	cancelPromise wampShared.Cancellable,
+	cancelPromise wampShared.CancelPromise,
 ) *PendingResponse[T] {
 	return &PendingResponse[T]{false, promise, cancelPromise}
 }
@@ -122,7 +128,7 @@ func (pendingResponse *PendingResponse[T]) Await() (replyEvent ReplyEvent, paylo
 			e = replyEvent.Payload(&payload)
 		}
 	} else {
-		e = TimedOut
+		e = TimedOutError
 	}
 	return replyEvent, payload, e
 }
@@ -160,6 +166,101 @@ func Call[O, I any](
 		return pendingResponse, nil
 	}
 	return nil, e
+}
+
+type NewResourcePayload[O any] struct {
+	URI     string
+	Options *O
+}
+
+func Subscribe(
+	session *Session,
+	uri string,
+	options *SubscribeOptions,
+	procedure PublishProcedure,
+) (*Subscription, error) {
+	pendingResponse, e := Call[Subscription](
+		session,
+		&CallFeatures{URI: "wamp.router.subscribe"},
+		NewResourcePayload[SubscribeOptions]{uri, options},
+	)
+	if e != nil {
+		// TODO log
+		return nil, e
+	}
+
+	_, subscription, e := pendingResponse.Await()
+	if e == nil {
+		endpoint := NewPublishEventEndpoint(procedure)
+		session.Subscriptions[subscription.ID] = endpoint
+		return &subscription, nil
+	}
+	return nil, e
+}
+
+func Register(
+	session *Session,
+	uri string,
+	options *RegisterOptions,
+	procedure CallProcedure,
+) (*Registration, error) {
+	pendingResponse, e := Call[Registration](
+		session,
+		&CallFeatures{URI: "wamp.router.register"},
+		NewResourcePayload[RegisterOptions]{uri, options},
+	)
+	if e != nil {
+		// TODO log
+		return nil, e
+	}
+
+	_, registration, e := pendingResponse.Await()
+	if e == nil {
+		endpoint := NewCallEventEndpoint(procedure)
+		session.Registrations[registration.ID] = endpoint
+		return &registration, nil
+	}
+	return nil, e
+}
+
+func Unsubscribe(
+	session *Session,
+	subscriptionID string,
+) error {
+	pendingResponse, e := Call[struct{}](
+		session,
+		&CallFeatures{URI: "wamp.router.unsubscribe"},
+		subscriptionID,
+	)
+	if e == nil {
+		delete(session.Subscriptions, subscriptionID)
+		_, _, e = pendingResponse.Await()
+	}
+	return e
+}
+
+func Unregister(
+	session *Session,
+	registrationID string,
+) error {
+	pendingResponse, e := Call[struct{}](
+		session,
+		&CallFeatures{URI: "wamp.router.unregister"},
+		registrationID,
+	)
+	if e == nil {
+		delete(session.Registrations, registrationID)
+		_, _, e = pendingResponse.Await()
+	}
+	return e
+}
+
+func Leave(
+	session *Session,
+	reason string,
+) error {
+	e := session.peer.Close()
+	return e
 }
 
 type NewGeneratorPayload struct {
@@ -253,7 +354,7 @@ func Yield[I any](
 		if done {
 			source = nextEvent
 		} else {
-			return nil, TimedOut
+			return nil, TimedOutError
 		}
 	}
 
@@ -284,105 +385,10 @@ func Yield[I any](
 	case <-stopEventPromise:
 		cancelNextEventPromise()
 
-		return nil, Cancelled
+		return nil, CancelledError
 	case nextEvent := <-nextEventPromise:
 		cancelStopEventPromise()
 
 		return nextEvent, nil
 	}
-}
-
-type NewResourcePayload[O any] struct {
-	URI     string
-	Options *O
-}
-
-func Subscribe(
-	session *Session,
-	uri string,
-	options *SubscribeOptions,
-	procedure PublishProcedure,
-) (*Subscription, error) {
-	pendingResponse, e := Call[Subscription](
-		session,
-		&CallFeatures{URI: "wamp.router.subscribe"},
-		NewResourcePayload[SubscribeOptions]{uri, options},
-	)
-	if e != nil {
-		// TODO log
-		return nil, e
-	}
-
-	_, subscription, e := pendingResponse.Await()
-	if e == nil {
-		endpoint := NewPublishEndpoint(procedure)
-		session.Subscriptions[subscription.ID] = endpoint
-		return &subscription, nil
-	}
-	return nil, e
-}
-
-func Register(
-	session *Session,
-	uri string,
-	options *RegisterOptions,
-	procedure CallProcedure,
-) (*Registration, error) {
-	pendingResponse, e := Call[Registration](
-		session,
-		&CallFeatures{URI: "wamp.router.register"},
-		NewResourcePayload[RegisterOptions]{uri, options},
-	)
-	if e != nil {
-		// TODO log
-		return nil, e
-	}
-
-	_, registration, e := pendingResponse.Await()
-	if e == nil {
-		endpoint := NewCallEndpoint(procedure)
-		session.Registrations[registration.ID] = endpoint
-		return &registration, nil
-	}
-	return nil, e
-}
-
-func Unsubscribe(
-	session *Session,
-	subscriptionID string,
-) error {
-	pendingResponse, e := Call[struct{}](
-		session,
-		&CallFeatures{URI: "wamp.router.unsubscribe"},
-		subscriptionID,
-	)
-	if e == nil {
-		delete(session.Subscriptions, subscriptionID)
-		_, _, e = pendingResponse.Await()
-	}
-	return e
-}
-
-func Unregister(
-	session *Session,
-	registrationID string,
-) error {
-	pendingResponse, e := Call[struct{}](
-		session,
-		&CallFeatures{URI: "wamp.router.unregister"},
-		registrationID,
-	)
-	if e == nil {
-		delete(session.Registrations, registrationID)
-		_, _, e = pendingResponse.Await()
-	}
-	return e
-}
-
-func Leave(
-	session *Session,
-	reason string,
-) error {
-	e := session.peer.Close()
-	return e
 }

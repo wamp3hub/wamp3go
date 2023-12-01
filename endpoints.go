@@ -1,44 +1,42 @@
 package wamp
 
-
 type PublishProcedure func(PublishEvent)
 
 type CallProcedure func(CallEvent) ReplyEvent
 
-type publishEndpoint struct {
-	procedure PublishProcedure
-}
+type publishEventEndpoint func(PublishEvent)
 
-func NewPublishEndpoint(procedure PublishProcedure) *publishEndpoint {
-	return &publishEndpoint{procedure}
-}
+func NewPublishEventEndpoint(procedure PublishProcedure) publishEventEndpoint {
+	return func(publishEvent PublishEvent) {
+		finnaly := func() {
+			e := recover()
+			if e == nil {
+			} else {
+			}
+		}
 
-func (endpoint publishEndpoint) execute(event PublishEvent) {
-	defer recover()
-	endpoint.procedure(event)
-}
+		defer finnaly()
 
-type callEndpoint struct {
-	procedure CallProcedure
-	result ReplyEvent
-}
-
-func NewCallEndpoint(procedure CallProcedure) *callEndpoint {
-	return &callEndpoint{procedure, nil}
-}
-
-func (endpoint callEndpoint) recover(callEvent CallEvent) {
-	r := recover()
-	if r == nil {
-		// TODO Log
-	} else {
-		// TODO Log
-		endpoint.result = NewReplyEvent(callEvent, InternalError)
+		procedure(publishEvent)
 	}
 }
 
-func (endpoint callEndpoint) execute(callEvent CallEvent) ReplyEvent {
-	defer endpoint.recover(callEvent)
-	endpoint.result = endpoint.procedure(callEvent)
-	return endpoint.result
+type callEventEndpoint func(CallEvent) ReplyEvent
+
+func NewCallEventEndpoint(procedure CallProcedure) callEventEndpoint {
+	return func(callEvent CallEvent) (replyEvent ReplyEvent) {
+		finnaly := func() {
+			e := recover()
+			if e == nil {
+
+			} else {
+				replyEvent = NewReplyEvent(callEvent, e)
+			}
+		}
+
+		defer finnaly()
+
+		replyEvent = procedure(callEvent)
+		return replyEvent
+	}
 }
