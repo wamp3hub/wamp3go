@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net"
+	"os"
 
 	wamp "github.com/wamp3hub/wamp3go"
 )
@@ -69,12 +71,9 @@ func (transport *unixTransport) ReadJSON(payload any) error {
 func (transport *unixTransport) Read() (event wamp.Event, e error) {
 	rawMessage, e := transport.ReadRaw()
 	if e == nil {
-		event, e = transport.Serializer.Decode(rawMessage)
-		if e == nil {
-			return event, nil
-		}
+		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, e
+	return nil, wamp.ErrorConnectionLost
 }
 
 type UnixServerMessage struct {
@@ -89,8 +88,10 @@ type UnixClientMessage struct {
 func UnixConnect(
 	path string,
 	serializer wamp.Serializer,
+	logger *slog.Logger,
 ) (wamp.Transport, string, error) {
-	log.Printf("[unix] dial %s", path)
+	logData := slog.Group("unix", "path", path, "serializer", serializer.Code())
+	logger.Debug("trying to connect", logData)
 	connection, e := net.Dial("unix", path)
 	if e == nil {
 		transport := UnixTransport(serializer, connection)
@@ -111,11 +112,16 @@ func UnixJoin(
 	path string,
 	serializer wamp.Serializer,
 ) (*wamp.Session, error) {
-	log.Printf("[unix] trying to join %s", path)
-	transport, peerID, e := UnixConnect(path, serializer)
+	handler := slog.NewTextHandler(
+		os.Stdout,
+		&slog.HandlerOptions{AddSource: false, Level: slog.LevelDebug},
+	)
+	logger := slog.New(handler)
+
+	transport, peerID, e := UnixConnect(path, serializer, logger)
 	if e == nil {
-		peer := wamp.SpawnPeer(peerID, transport)
-		session := wamp.NewSession(peer)
+		peer := wamp.SpawnPeer(peerID, transport, logger)
+		session := wamp.NewSession(peer, logger)
 		log.Printf("[unix] peer.ID=%s joined to %s", peer.ID, path)
 		return session, nil
 	}

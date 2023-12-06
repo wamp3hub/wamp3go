@@ -29,15 +29,15 @@ func main() {
 
 	registration, e := wamp.Register(
 		session,
-		"example.greeting",
+		"net.example.greeting",
 		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
-			name := ""
+		func(callEvent wamp.CallEvent) any {
+			var name string
 			e := callEvent.Payload(&name)
-			if e == nil {
-				return wamp.NewReplyEvent(callEvent, "Hello, "+name+"!")
+			if e == nil && len(name) > 0 {
+				return "Hello, "+name+"!"
 			}
-			return wamp.NewErrorEvent(callEvent, errors.New("InvalidName"))
+			return errors.New("InvalidName")
 		},
 	)
 	if e == nil {
@@ -46,14 +46,11 @@ func main() {
 		panic("register error")
 	}
 
-	pendingResponse, e := wamp.Call[string](
+	pendingResponse := wamp.Call[string](
 		session,
-		&wamp.CallFeatures{URI: "example.greeting"},
+		&wamp.CallFeatures{URI: "net.example.greeting"},
 		"WAMP",
 	)
-	if e == nil {
-		panic("call error")
-	}
 
 	_, v, e := pendingResponse.Await()
 	if e == nil {

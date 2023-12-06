@@ -30,15 +30,14 @@ func main() {
 		session,
 		"example.reverse",
 		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
+		func(callEvent wamp.CallEvent) any {
 			source := wamp.Event(callEvent)
 			n := 0
 			e := callEvent.Payload(&n)
 			if e == nil {
 				for i := n; i > 0; i-- {
-					source, _ = wamp.Yield(source, i)
+					source = wamp.Yield(source, i)
 				}
-				return wamp.NewReplyEvent(source, 0)
 			}
 			return wamp.GeneratorExit(source)
 		},

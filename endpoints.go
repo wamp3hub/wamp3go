@@ -1,21 +1,35 @@
 package wamp
 
+import (
+	"errors"
+	"log/slog"
+)
+
+var (
+	ErrorApplication = errors.New("ApplicationError")
+)
+
 type PublishProcedure func(PublishEvent)
 
-type CallProcedure func(CallEvent) ReplyEvent
+type CallProcedure func(CallEvent) any
 
 type publishEventEndpoint func(PublishEvent)
 
-func NewPublishEventEndpoint(procedure PublishProcedure) publishEventEndpoint {
+func NewPublishEventEndpoint(
+	procedure PublishProcedure,
+	logger *slog.Logger,
+) publishEventEndpoint {
 	return func(publishEvent PublishEvent) {
-		finnaly := func() {
+		finally := func() {
 			e := recover()
 			if e == nil {
+				logger.Debug("endpoint execution success")
 			} else {
+				logger.Debug("during endpoint execution", "error", e)
 			}
 		}
 
-		defer finnaly()
+		defer finally()
 
 		procedure(publishEvent)
 	}
@@ -23,20 +37,33 @@ func NewPublishEventEndpoint(procedure PublishProcedure) publishEventEndpoint {
 
 type callEventEndpoint func(CallEvent) ReplyEvent
 
-func NewCallEventEndpoint(procedure CallProcedure) callEventEndpoint {
+func NewCallEventEndpoint(
+	procedure CallProcedure,
+	logger *slog.Logger,
+) callEventEndpoint {
 	return func(callEvent CallEvent) (replyEvent ReplyEvent) {
-		finnaly := func() {
+		var returning any
+
+		finally := func() {
 			e := recover()
 			if e == nil {
+				logger.Debug("endpoint execution success")
 
+				e, isError := returning.(error)
+				if isError {
+					replyEvent = NewErrorEvent(callEvent, e)
+				} else {
+					replyEvent = NewReplyEvent(callEvent, returning)
+				}
 			} else {
-				replyEvent = NewReplyEvent(callEvent, e)
+				logger.Debug("during endpoint execution", "error", e)
+				replyEvent = NewErrorEvent(callEvent, ErrorApplication)
 			}
 		}
 
-		defer finnaly()
+		defer finally()
 
-		replyEvent = procedure(callEvent)
+		returning = procedure(callEvent)
 		return replyEvent
 	}
 }

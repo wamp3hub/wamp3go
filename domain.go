@@ -3,7 +3,6 @@ package wamp
 import (
 	"errors"
 	"strings"
-	"time"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
@@ -11,14 +10,15 @@ import (
 type MessageKind int8
 
 const (
-	MK_CALL    MessageKind = 127
-	MK_CANCEL              = 126
-	MK_NEXT                = 125
-	MK_PUBLISH             = 1
-	MK_ACCEPT              = 0
-	MK_YIELD               = -125
-	MK_ERROR               = -126
-	MK_REPLY               = -127
+	MK_CALL      MessageKind = 127
+	MK_CANCEL                = 126
+	MK_NEXT                  = 125
+	MK_PUBLISH               = 1
+	MK_ACCEPT                = 0
+	MK_UNDEFINED             = -1
+	MK_YIELD                 = -125
+	MK_ERROR                 = -126
+	MK_REPLY                 = -127
 )
 
 type eventProto[F any] struct {
@@ -151,8 +151,8 @@ func newPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 }
 
 type CallFeatures struct {
-	URI     string        `json:"URI"`
-	Timeout time.Duration `json:"timeout"`
+	URI     string `json:"URI"`
+	Timeout uint64 `json:"timeout"`
 }
 
 type CallRoute struct {
@@ -283,9 +283,9 @@ func GeneratorExit(source Event) ErrorEvent {
 }
 
 type NextFeatures struct {
-	GeneratorID string        `json:"generatorID"`
-	YieldID     string        `json:"yieldID"`
-	Timeout     time.Duration `json:"timeout"`
+	GeneratorID string `json:"generatorID"`
+	YieldID     string `json:"yieldID"`
+	Timeout     uint64 `json:"timeout"`
 }
 
 type NextEvent interface {

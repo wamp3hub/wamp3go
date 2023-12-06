@@ -2,7 +2,8 @@ package wampTransports
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/gorilla/websocket"
 
@@ -38,25 +39,25 @@ func (transport *wsTransport) Write(event wamp.Event) error {
 func (transport *wsTransport) Read() (wamp.Event, error) {
 	_, rawMessage, e := transport.Connection.ReadMessage()
 	if e == nil {
-		event, e := transport.Serializer.Decode(rawMessage)
-		if e == nil {
-			return event, nil
-		}
+		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, wamp.ConnectionLostError
+	return nil, wamp.ErrorConnectionLost
 }
 
 func WebsocketConnect(
 	address string,
 	serializer wamp.Serializer,
+	logger *slog.Logger,
 ) (wamp.Transport, error) {
-	log.Printf("[http2websocket] dial %s", address)
+	logData := slog.Group("websocket", "address", address, "serializer", serializer.Code())
+	logger.Debug("trying to connect", logData)
 	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
 		transport := WSTransport(serializer, connection)
 		return transport, nil
 	}
-	log.Printf("[http2websocket] connect statusCode=%s error=%s", response.Status, e)
+
+	logger.Debug("during connect", "response.Status", response.Status, "error", e, logData)
 	return nil, e
 }
 
@@ -66,7 +67,12 @@ func WebsocketJoin(
 	serializer wamp.Serializer,
 	credentials any,
 ) (*wamp.Session, error) {
-	log.Printf("[http2websocket] trying to join %s", address)
+	handler := slog.NewTextHandler(
+		os.Stdout,
+		&slog.HandlerOptions{AddSource: false, Level: slog.LevelDebug},
+	)
+	logger := slog.New(handler)
+
 	payload, e := wampInterview.HTTP2Interview(
 		address,
 		secure,
@@ -81,11 +87,11 @@ func WebsocketJoin(
 			"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
 			protocol, address, payload.Ticket, serializer.Code(),
 		)
-		transport, e := WebsocketConnect(wsAddress, serializer)
+		transport, e := WebsocketConnect(wsAddress, serializer, logger)
 		if e == nil {
-			peer := wamp.SpawnPeer(payload.YourID, transport)
-			session := wamp.NewSession(peer)
-			log.Printf("[http2websocket] peer.ID=%s joined to %s", peer.ID, address)
+			peer := wamp.SpawnPeer(payload.YourID, transport, logger)
+			session := wamp.NewSession(peer, logger)
+			logger.Debug("joined", "peer.ID", peer.ID, "address", address)
 			return session, nil
 		}
 		return nil, e
