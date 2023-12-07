@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -19,10 +21,16 @@ func main() {
 	}
 
 	session, e := wampTransports.WebsocketJoin(
-		"0.0.0.0:8888",
-		false,
-		wampSerializers.DefaultSerializer,
-		&LoginPayload{"test", "test"},
+		&wampTransports.WebsocketJoinOptions{
+			Secure:      false,
+			Address:     "0.0.0.0:8888",
+			Serializer:  wampSerializers.DefaultSerializer,
+			Credentials: &LoginPayload{"test", "test"},
+			LoggingHandler: slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{AddSource: false, Level: slog.LevelDebug},
+			),
+		},
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")

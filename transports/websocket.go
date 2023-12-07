@@ -3,7 +3,6 @@ package wampTransports
 import (
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/gorilla/websocket"
 
@@ -47,54 +46,59 @@ func (transport *wsTransport) Read() (wamp.Event, error) {
 func WebsocketConnect(
 	address string,
 	serializer wamp.Serializer,
-	logger *slog.Logger,
-) (wamp.Transport, error) {
-	logData := slog.Group("websocket", "address", address, "serializer", serializer.Code())
-	logger.Debug("trying to connect", logData)
-	connection, response, e := websocket.DefaultDialer.Dial(address, nil)
+) (*wsTransport, error) {
+	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
 	if e == nil {
 		transport := WSTransport(serializer, connection)
 		return transport, nil
 	}
-
-	logger.Debug("during connect", "response.Status", response.Status, "error", e, logData)
 	return nil, e
 }
 
+type WebsocketJoinOptions struct {
+	Secure         bool
+	Address        string
+	Serializer     wamp.Serializer
+	Credentials    any
+	LoggingHandler slog.Handler
+}
+
 func WebsocketJoin(
-	address string,
-	secure bool,
-	serializer wamp.Serializer,
-	credentials any,
+	joinOptions *WebsocketJoinOptions,
 ) (*wamp.Session, error) {
-	handler := slog.NewTextHandler(
-		os.Stdout,
-		&slog.HandlerOptions{AddSource: false, Level: slog.LevelDebug},
-	)
-	logger := slog.New(handler)
+	logger := slog.New(joinOptions.LoggingHandler)
+	joinOptionsLogData := slog.Group("joinOptions", "address", joinOptions.Address, "secure", joinOptions.Secure, "serializer", joinOptions.Serializer.Code())
+	logger.Debug("trying to join", joinOptionsLogData)
 
 	payload, e := wampInterview.HTTP2Interview(
-		address,
-		secure,
-		&wampInterview.Payload{Credentials: credentials},
+		joinOptions.Address,
+		joinOptions.Secure,
+		&wampInterview.Payload{Credentials: joinOptions.Credentials},
 	)
-	if e == nil {
-		protocol := "ws"
-		if secure {
-			protocol = "wss"
-		}
-		wsAddress := fmt.Sprintf(
-			"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
-			protocol, address, payload.Ticket, serializer.Code(),
-		)
-		transport, e := WebsocketConnect(wsAddress, serializer, logger)
-		if e == nil {
-			peer := wamp.SpawnPeer(payload.YourID, transport, logger)
-			session := wamp.NewSession(peer, logger)
-			logger.Debug("joined", "peer.ID", peer.ID, "address", address)
-			return session, nil
-		}
+	if e != nil {
+		logger.Error("interview failed", "error", e, joinOptionsLogData)
 		return nil, e
 	}
+
+	interviewLogData := slog.Group("interview", "peerID", payload.YourID, "routerID", payload.RouterID, "ticket", payload.Ticket)
+	logger.Debug("interview has been completed", joinOptionsLogData, interviewLogData)
+
+	protocol := "ws"
+	if joinOptions.Secure {
+		protocol = "wss"
+	}
+	wsAddress := fmt.Sprintf(
+		"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
+		protocol, joinOptions.Address, payload.Ticket, joinOptions.Serializer.Code(),
+	)
+	transport, e := WebsocketConnect(wsAddress, joinOptions.Serializer)
+	if e == nil {
+		peer := wamp.SpawnPeer(payload.YourID, transport, logger)
+		session := wamp.NewSession(peer, logger)
+		logger.Debug("successful joined", joinOptionsLogData, interviewLogData)
+		return session, nil
+	}
+
+	logger.Error("join failed", "error", e, joinOptionsLogData, interviewLogData)
 	return nil, e
 }

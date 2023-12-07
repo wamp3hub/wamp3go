@@ -57,7 +57,8 @@ func JSONPost[T any](url string, inPayload any) (*T, error) {
 			e = errors.New(responsePayload.Message)
 		}
 	} else {
-		e = errors.New("something went wrong")
+		errorMessage := fmt.Sprintf("HTTP2: %s", response.Status)
+		e = errors.New(errorMessage)
 	}
 	return nil, e
 }
