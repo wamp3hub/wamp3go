@@ -28,7 +28,7 @@ func main() {
 			Credentials: &LoginPayload{"test", "test"},
 			LoggingHandler: slog.NewTextHandler(
 				os.Stdout,
-				&slog.HandlerOptions{AddSource: false, Level: slog.LevelDebug},
+				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
 			),
 		},
 	)
