@@ -55,25 +55,15 @@ func (event *eventProto[F]) getPeer() *Peer {
 }
 
 type eventPayload interface {
-	Content() any
-	Payload(any) error
+	Payload() any
 }
 
 type payloadEventField[T any] struct {
-	value T
+	payload T
 }
 
-func (field *payloadEventField[T]) Content() any {
-	return field.value
-}
-
-func (field *payloadEventField[T]) Payload(__v any) error {
-	v, ok := __v.(*T)
-	if ok {
-		*v = field.value
-		return nil
-	}
-	return InvalidPayload
+func (field *payloadEventField[T]) Payload() any {
+	return field.payload
 }
 
 type routeEventField[T any] struct {
@@ -129,21 +119,21 @@ type PublishEvent interface {
 	Route() *PublishRoute
 }
 
-func MakePublishEvent(
+func MakePublishEvent[T any](
 	id string,
 	features *PublishFeatures,
-	data eventPayload,
+	data T,
 	route *PublishRoute,
 ) PublishEvent {
 	type message struct {
 		*eventProto[*PublishFeatures]
+		*payloadEventField[T]
 		*routeEventField[*PublishRoute]
-		eventPayload
 	}
 	return &message{
 		&eventProto[*PublishFeatures]{id, MK_PUBLISH, features, nil},
+		&payloadEventField[T]{data},
 		&routeEventField[*PublishRoute]{route},
-		data,
 	}
 }
 
@@ -151,7 +141,7 @@ func newPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 	return MakePublishEvent(
 		wampShared.NewID(),
 		features,
-		&payloadEventField[T]{data},
+		data,
 		new(PublishRoute),
 	)
 }
@@ -178,18 +168,18 @@ type CallEvent interface {
 func MakeCallEvent(
 	id string,
 	features *CallFeatures,
-	data eventPayload,
+	data any,
 	route *CallRoute,
 ) CallEvent {
 	type message struct {
 		*eventProto[*CallFeatures]
 		*routeEventField[*CallRoute]
-		eventPayload
+		*payloadEventField[any]
 	}
 	return &message{
 		&eventProto[*CallFeatures]{id, MK_CALL, features, nil},
 		&routeEventField[*CallRoute]{route},
-		data,
+		&payloadEventField[any]{data},
 	}
 }
 
@@ -197,7 +187,7 @@ func newCallEvent[T any](features *CallFeatures, data T) CallEvent {
 	return MakeCallEvent(
 		wampShared.NewID(),
 		features,
-		&payloadEventField[T]{data},
+		data,
 		new(CallRoute),
 	)
 }
@@ -219,7 +209,9 @@ func MakeCancelEvent(
 	type message struct {
 		*eventProto[*ReplyFeatures]
 	}
-	return &message{&eventProto[*ReplyFeatures]{id, MK_CANCEL, features, nil}}
+	return &message{
+		&eventProto[*ReplyFeatures]{id, MK_CANCEL, features, nil},
+	}
 }
 
 func newCancelEvent(source Event) CancelEvent {
@@ -236,13 +228,16 @@ func MakeReplyEvent(
 	id string,
 	kind MessageKind,
 	features *ReplyFeatures,
-	data eventPayload,
+	data any,
 ) ReplyEvent {
 	type message struct {
 		*eventProto[*ReplyFeatures]
-		eventPayload
+		*payloadEventField[any]
 	}
-	return &message{&eventProto[*ReplyFeatures]{id, kind, features, nil}, data}
+	return &message{
+		&eventProto[*ReplyFeatures]{id, kind, features, nil},
+		&payloadEventField[any]{data},
+	}
 }
 
 func NewReplyEvent[T any](source Event, data T) ReplyEvent {
@@ -250,7 +245,7 @@ func NewReplyEvent[T any](source Event, data T) ReplyEvent {
 		wampShared.NewID(),
 		MK_REPLY,
 		&ReplyFeatures{source.ID(), []string{}},
-		&payloadEventField[T]{data},
+		data,
 	)
 }
 
@@ -262,9 +257,12 @@ type ErrorEvent = ReplyEvent
 
 func NewErrorEvent(source Event, e error) ErrorEvent {
 	errorMessage := e.Error()
-	payload := errorEventPayload{errorMessage}
-	data := payloadEventField[errorEventPayload]{payload}
-	return MakeReplyEvent(wampShared.NewID(), MK_ERROR, &ReplyFeatures{source.ID(), []string{}}, &data)
+	return MakeReplyEvent(
+		wampShared.NewID(),
+		MK_ERROR,
+		&ReplyFeatures{source.ID(), []string{}},
+		errorEventPayload{errorMessage},
+	)
 }
 
 type YieldEvent = ReplyEvent
@@ -274,7 +272,7 @@ func newYieldEvent[T any](source Event, data T) YieldEvent {
 		wampShared.NewID(),
 		MK_YIELD,
 		&ReplyFeatures{source.ID(), []string{}},
-		&payloadEventField[T]{data},
+		data,
 	)
 }
 

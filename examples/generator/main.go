@@ -34,20 +34,18 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := wamp.Register[int](
+	registration, e := wamp.Register(
 		session,
 		"example.reverse",
 		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) any {
+		func(n int, callEvent wamp.CallEvent) (int, error) {
 			source := wamp.Event(callEvent)
-			n := 0
-			e := callEvent.Payload(&n)
 			if e == nil {
 				for i := n; i > 0; i-- {
 					source = wamp.Yield(source, i)
 				}
 			}
-			return wamp.GeneratorExit(source)
+			return -1, wamp.GeneratorExit(source)
 		},
 	)
 	if e == nil {
@@ -59,7 +57,7 @@ func main() {
 	generator, e := wamp.NewRemoteGenerator[int](
 		session,
 		&wamp.CallFeatures{URI: "example.reverse"},
-		99,
+		100,
 	)
 	if e != nil {
 		fmt.Printf("generator create error %s\n", e)

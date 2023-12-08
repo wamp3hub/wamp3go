@@ -1,7 +1,6 @@
 package wamp
 
 import (
-	"errors"
 	"log/slog"
 	"time"
 
@@ -136,32 +135,27 @@ func newPendingResponse[T any](
 	return &PendingResponse[T]{false, promise, cancelPromise}
 }
 
-func (pendingResponse *PendingResponse[T]) Cancel() {
+func (pendingResponse *PendingResponse[T]) lock() {
 	if pendingResponse.used {
 		panic("can not use again")
 	}
 	pendingResponse.used = true
+}
+
+func (pendingResponse *PendingResponse[T]) Cancel() {
+	pendingResponse.lock()
 	pendingResponse.cancelPromise()
 }
 
-func (pendingResponse *PendingResponse[T]) Await() (replyEvent ReplyEvent, payload T, e error) {
-	if pendingResponse.used {
-		panic("can not use again")
-	}
+func (pendingResponse *PendingResponse[T]) Await() (ReplyEvent, T, error) {
+	pendingResponse.lock()
 	replyEvent, promiseCompleted := <-pendingResponse.promise
-	pendingResponse.used = true
 	if promiseCompleted {
-		if replyEvent.Kind() == MK_ERROR {
-			__payload := new(errorEventPayload)
-			replyEvent.Payload(__payload)
-			e = errors.New(__payload.Message)
-		} else {
-			e = replyEvent.Payload(&payload)
-		}
-	} else {
-		e = ErrorTimedOut
+		payload, e := serializePayload[T](replyEvent)
+		return replyEvent, *payload, e
 	}
-	return replyEvent, payload, e
+	var payload T
+	return nil, payload, ErrorTimedOut
 }
 
 func Call[O, I any](
@@ -219,16 +213,16 @@ type NewResourcePayload[O any] struct {
 	Options *O
 }
 
-func Subscribe(
+func Subscribe[I any](
 	session *Session,
 	uri string,
 	options *SubscribeOptions,
-	procedure PublishProcedure,
+	procedure PublishProcedure[I],
 ) (*Subscription, error) {
 	logData := slog.Group("subscription", "URI", uri)
 	session.logger.Debug("trying to subscribe", logData)
 
-	pendingResponse := Call[Subscription](
+	pendingResponse := Call[*Subscription](
 		session,
 		&CallFeatures{URI: "wamp.router.subscribe"},
 		NewResourcePayload[SubscribeOptions]{uri, options},
@@ -236,26 +230,26 @@ func Subscribe(
 
 	_, subscription, e := pendingResponse.Await()
 	if e == nil {
-		endpoint := NewPublishEventEndpoint(procedure, session.logger.With(logData))
+		endpoint := NewPublishEventEndpoint[I](procedure, session.logger)
 		session.Subscriptions[subscription.ID] = endpoint
 		session.logger.Debug("new subscription", logData)
-		return &subscription, nil
+		return subscription, nil
 	}
 
 	session.logger.Error("during subscribe", "error", e, logData)
 	return nil, e
 }
 
-func Register[O any](
+func Register[I, O any](
 	session *Session,
 	uri string,
 	options *RegisterOptions,
-	procedure CallProcedure,
+	procedure CallProcedure[I, O],
 ) (*Registration, error) {
 	logData := slog.Group("registration", "URI", uri)
 	session.logger.Debug("trying to register", logData)
 
-	pendingResponse := Call[Registration](
+	pendingResponse := Call[*Registration](
 		session,
 		&CallFeatures{URI: "wamp.router.register"},
 		NewResourcePayload[RegisterOptions]{uri, options},
@@ -263,10 +257,10 @@ func Register[O any](
 
 	_, registration, e := pendingResponse.Await()
 	if e == nil {
-		endpoint := NewCallEventEndpoint[O](procedure, session.logger.With(logData))
+		endpoint := NewCallEventEndpoint[I, O](procedure, session.logger)
 		session.Registrations[registration.ID] = endpoint
 		session.logger.Debug("new registration", logData)
-		return &registration, nil
+		return registration, nil
 	}
 
 	session.logger.Error("during register", "error", e, logData)
@@ -279,7 +273,7 @@ func Unsubscribe(
 ) error {
 	logData := slog.Group("subscription", "ID", subscriptionID)
 	session.logger.Debug("trying to unsubscribe", logData)
-	pendingResponse := Call[bool](
+	pendingResponse := Call[struct{}](
 		session,
 		&CallFeatures{URI: "wamp.router.unsubscribe"},
 		subscriptionID,
@@ -299,7 +293,7 @@ func Unregister(
 ) error {
 	logData := slog.Group("registration", "ID", registrationID)
 	session.logger.Debug("trying to unregister", logData)
-	pendingResponse := Call[bool](
+	pendingResponse := Call[struct{}](
 		session,
 		&CallFeatures{URI: "wamp.router.unregister"},
 		registrationID,
@@ -451,10 +445,10 @@ func yieldNext(
 
 	stopEventPromise, cancelStopEventPromise := peer.PendingCancelEvents.New(generatorID, lifetime)
 
-	logger.Debug("trying to send yield event",)
+	logger.Debug("trying to send yield event")
 	e := peer.Send(yieldEvent)
 	if e != nil {
-		peer.logger.Error("during send yield event (destroying generator)", "error", e,)
+		peer.logger.Error("during send yield event (destroying generator)", "error", e)
 		cancelNextEventPromise()
 		cancelStopEventPromise()
 		panic("something went wrong")
@@ -463,15 +457,15 @@ func yieldNext(
 	select {
 	case _, done := <-stopEventPromise:
 		if done {
-			logger.Warn("generator stop event received (destroying generator)",)
+			logger.Warn("generator stop event received (destroying generator)")
 		} else {
-			logger.Warn("generator lifetime expired (destroying generator)",)
+			logger.Warn("generator lifetime expired (destroying generator)")
 		}
 		cancelNextEventPromise()
 		panic("generator destroy")
 	case nextEvent := <-nextEventPromise:
 		cancelStopEventPromise()
-		logger.Debug("continue", "nextEvent.ID", nextEvent.ID(),)
+		logger.Debug("continue", "nextEvent.ID", nextEvent.ID())
 		return nextEvent
 	}
 }

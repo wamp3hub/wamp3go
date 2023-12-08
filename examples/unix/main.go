@@ -39,14 +39,15 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	onEcho := func(publishEvent wamp.PublishEvent) {
-		payload := ""
-		publishEvent.Payload(&payload)
-		fmt.Printf("new message %s\n", payload)
-		wg.Done()
-	}
-
-	wamp.Subscribe(session, "example.echo", &wamp.SubscribeOptions{}, onEcho)
+	wamp.Subscribe(
+		session,
+		"example.echo",
+		&wamp.SubscribeOptions{},
+		func(message string, publishEvent wamp.PublishEvent) {
+			fmt.Printf("new message %s\n", message)
+			wg.Done()
+		},
+	)
 
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "Hello, WAMP!")
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "How are you?")

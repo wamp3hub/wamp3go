@@ -9,69 +9,132 @@ var (
 	ErrorApplication = errors.New("ApplicationError")
 )
 
-type PublishProcedure func(PublishEvent)
+type Decodable interface {
+	Decode(v any) error
+}
 
-type publishEventEndpoint func(PublishEvent)
+type eventSerializable interface {
+	Event
+	eventPayload
+}
 
-func NewPublishEventEndpoint(
-	procedure PublishProcedure,
-	logger *slog.Logger,
-) publishEventEndpoint {
-	return func(publishEvent PublishEvent) {
-		finally := func() {
-			e := recover()
+func serializePayload[T any](event eventSerializable) (*T, error) {
+	v := event.Payload()
+	decoder, ok := v.(Decodable)
+
+	if event.Kind() == MK_ERROR {
+		if ok {
+			payload := new(errorEventPayload)
+			e := decoder.Decode(payload)
 			if e == nil {
-				logger.Debug("endpoint execution success")
-			} else {
-				logger.Debug("during endpoint execution", "error", e)
+				return nil, errors.New(payload.Message)
 			}
 		}
 
-		defer finally()
+		payload, ok := v.(errorEventPayload)
+		if ok {
+			return nil, errors.New(payload.Message)
+		}
 
-		procedure(publishEvent)
+		return nil, errors.New("unexpected type")
 	}
+
+	if ok {
+		payload := new(T)
+		e := decoder.Decode(payload)
+		return payload, e
+	}
+
+	payload, ok := v.(T)
+	if ok {
+		return &payload, nil
+	}
+
+	return nil, errors.New("unexpected type")
 }
 
-type CallProcedure func(CallEvent) any
+type PublishProcedure[I any] func(I, PublishEvent)
+
+type publishEventEndpoint func(PublishEvent)
+
+func NewPublishEventEndpoint[I any](
+	procedure PublishProcedure[I],
+	__logger *slog.Logger,
+) publishEventEndpoint {
+	logger := __logger.With("name", "PublishEventEndpoint")
+	return func(publishEvent PublishEvent) {
+		payload, e := serializePayload[I](publishEvent)
+		if e == nil {
+			finally := func() {
+				e := recover()
+				if e == nil {
+					logger.Debug("endpoint execution success")
+				} else {
+					logger.Debug("during endpoint execution", "error", e)
+				}
+			}
+	
+			defer finally()
+	
+			procedure(*payload, publishEvent)
+		} else {
+			logger.Warn("during serialize payload", "error", e)
+		}
+	}
+}
 
 type generatorExitException struct {
 	Source Event
 }
 
+func (generatorExitException) Error() string {
+	return "GeneratorExit"
+}
+
+type CallProcedure[I, O any] func(I, CallEvent) (O, error)
+
 type callEventEndpoint func(CallEvent) ReplyEvent
 
-func NewCallEventEndpoint[O any](
-	procedure CallProcedure,
-	logger *slog.Logger,
+func NewCallEventEndpoint[I, O any](
+	procedure CallProcedure[I, O],
+	__logger *slog.Logger,
 ) callEventEndpoint {
+	logger := __logger.With("name", "CallEventEndpoint")
 	return func(callEvent CallEvent) (replyEvent ReplyEvent) {
-		var returning any
+		payload, e := serializePayload[I](callEvent)
+		if e != nil {
+			logger.Warn("during serialize payload", "error", e)
+			replyEvent = NewErrorEvent(callEvent, InvalidPayload)
+			return replyEvent
+		}
+
+		var (
+			returnValue O
+			returnError error
+		)
 
 		finally := func() {
-			e := recover()
-			if e == nil {
+			r := recover()
+			if r == nil {
 				logger.Debug("endpoint execution success")
 
-				switch __returning := returning.(type) {
-				case O:
-					replyEvent = NewReplyEvent(callEvent, __returning)
-				case error:
-					replyEvent = NewErrorEvent(callEvent, __returning)
-				case *generatorExitException:
-					replyEvent = NewErrorEvent(__returning.Source, errors.New("GeneratorExit"))
+				switch e := returnError.(type) {
+				case nil:
+					replyEvent = NewReplyEvent[O](callEvent, returnValue)
+				case (*generatorExitException):
+					replyEvent = NewErrorEvent(e.Source, e)
 				default:
-					logger.Debug("during endpoint execution", "error", e)
+					replyEvent = NewErrorEvent(callEvent, returnError)
 				}
 			} else {
-				logger.Debug("during endpoint execution", "error", e)
+				logger.Debug("during endpoint execution", "error", r)
 				replyEvent = NewErrorEvent(callEvent, ErrorApplication)
 			}
 		}
 
 		defer finally()
 
-		returning = procedure(callEvent)
+		returnValue, returnError = procedure(*payload, callEvent)
 		return replyEvent
 	}
 }

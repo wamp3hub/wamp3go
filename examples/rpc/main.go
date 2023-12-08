@@ -35,17 +35,16 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := wamp.Register[string](
+	registration, e := wamp.Register(
 		session,
 		"net.example.greeting",
 		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) any {
-			var name string
-			e := callEvent.Payload(&name)
-			if e == nil && len(name) > 0 {
-				return "Hello, "+name+"!"
+		func(name string, callEvent wamp.CallEvent) (string, error) {
+			if len(name) == 0 {
+				return "", errors.New("InvalidName")
 			}
-			return errors.New("InvalidName")
+			result := "Hello, "+name+"!"
+			return result, nil
 		},
 	)
 	if e == nil {
@@ -59,7 +58,6 @@ func main() {
 		&wamp.CallFeatures{URI: "net.example.greeting"},
 		"WAMP",
 	)
-
 	_, v, e := pendingResponse.Await()
 	if e == nil {
 		fmt.Printf("call(example.greeting) %s\n", v)

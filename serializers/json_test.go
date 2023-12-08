@@ -1,7 +1,6 @@
 package wampSerializers_test
 
 import (
-	"encoding/json"
 	"testing"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -31,13 +30,12 @@ func testAcceptEventSerializer(t *testing.T, serializer wamp.Serializer) {
 }
 
 func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	expectedPayload := "test"
 	expectedFeatures := wamp.PublishFeatures{URI: "wamp.test", Include: []string{}, Exclude: []string{wampShared.NewID()}}
-	rawPayload, _ := json.Marshal(expectedPayload)
+	expectedPayload := "test"
 	event := wamp.MakePublishEvent(
 		wampShared.NewID(),
 		&expectedFeatures,
-		&wampSerializer.PayloadJSONField{rawPayload},
+		expectedPayload,
 		nil,
 	)
 	raw, e := serializer.Encode(event)
@@ -57,9 +55,14 @@ func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 		t.Fatal("InvalidFeatures")
 	}
 	// TODO check features.Include and features.Exclude
-	payload := new(string)
-	event.Payload(payload)
-	if *payload != expectedPayload {
+	__payload := event.Payload()
+	decoder, ok := __payload.(wamp.Decodable)
+	if !ok {
+		t.Fatalf("InvalidBehaviour")
+	}
+	payload := ""
+	e = decoder.Decode(&payload)
+	if e != nil || payload != expectedPayload {
 		t.Fatal("InvalidPayload")
 	}
 }
@@ -67,11 +70,10 @@ func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedPayload := "test"
 	expectedFeatures := wamp.CallFeatures{URI: "wamp.test"}
-	rawPayload, _ := json.Marshal(expectedPayload)
 	event := wamp.MakeCallEvent(
 		wampShared.NewID(),
 		&expectedFeatures,
-		&wampSerializer.PayloadJSONField{rawPayload},
+		expectedPayload,
 		nil,
 	)
 	raw, e := serializer.Encode(event)
@@ -91,9 +93,14 @@ func testCallEventSerializer(t *testing.T, serializer wamp.Serializer) {
 		t.Fatal("InvalidFeatures")
 	}
 	// TODO check features.Include and features.Exclude
-	payload := new(string)
-	event.Payload(payload)
-	if *payload != expectedPayload {
+	__payload := event.Payload()
+	decoder, ok := __payload.(wamp.Decodable)
+	if !ok {
+		t.Fatalf("InvalidBehaviour")
+	}
+	payload := ""
+	e = decoder.Decode(&payload)
+	if e != nil || payload != expectedPayload {
 		t.Fatal("InvalidPayload")
 	}
 }
@@ -102,7 +109,7 @@ func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	callEvent := wamp.MakeCallEvent(
 		wampShared.NewID(),
 		&wamp.CallFeatures{URI: "wamp.test"},
-		&wampSerializer.PayloadJSONField{nil},
+		nil,
 		nil,
 	)
 	expectedPayload := "test"
@@ -123,9 +130,14 @@ func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	if features.InvocationID != callEvent.ID() {
 		t.Fatal("InvalidFeatures")
 	}
-	payload := new(string)
-	event.Payload(payload)
-	if *payload != expectedPayload {
+	__payload := event.Payload()
+	decoder, ok := __payload.(wamp.Decodable)
+	if !ok {
+		t.Fatalf("InvalidBehaviour")
+	}
+	payload := ""
+	e = decoder.Decode(&payload)
+	if e != nil || payload != expectedPayload {
 		t.Fatal("InvalidPayload")
 	}
 }
