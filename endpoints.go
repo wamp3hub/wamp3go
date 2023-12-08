@@ -11,8 +11,6 @@ var (
 
 type PublishProcedure func(PublishEvent)
 
-type CallProcedure func(CallEvent) any
-
 type publishEventEndpoint func(PublishEvent)
 
 func NewPublishEventEndpoint(
@@ -35,6 +33,12 @@ func NewPublishEventEndpoint(
 	}
 }
 
+type CallProcedure func(CallEvent) any
+
+type generatorExitException struct {
+	Source Event
+}
+
 type callEventEndpoint func(CallEvent) ReplyEvent
 
 func NewCallEventEndpoint[O any](
@@ -49,12 +53,15 @@ func NewCallEventEndpoint[O any](
 			if e == nil {
 				logger.Debug("endpoint execution success")
 
-				e, isError := returning.(error)
-				if isError {
-					replyEvent = NewErrorEvent(callEvent, e)
-				} else {
-					__returning := returning.(O)
+				switch __returning := returning.(type) {
+				case O:
 					replyEvent = NewReplyEvent(callEvent, __returning)
+				case error:
+					replyEvent = NewErrorEvent(callEvent, __returning)
+				case *generatorExitException:
+					replyEvent = NewErrorEvent(__returning.Source, errors.New("GeneratorExit"))
+				default:
+					logger.Debug("during endpoint execution", "error", e)
 				}
 			} else {
 				logger.Debug("during endpoint execution", "error", e)

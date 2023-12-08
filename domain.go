@@ -8,9 +8,8 @@ import (
 )
 
 var (
-	ErrorCancelled = errors.New("Cancelled")
-	ExitGenerator = errors.New("ExitGenerator")
-	InvalidPayload = errors.New("InvalidPayload")
+	ErrorCancelled    = errors.New("Cancelled")
+	InvalidPayload    = errors.New("InvalidPayload")
 	ProcedureNotFound = errors.New("ProcedureNotFound")
 )
 
@@ -283,10 +282,6 @@ type StopEvent = CancelEvent
 
 func NewStopEvent(generatorID string) StopEvent {
 	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{generatorID, []string{}})
-}
-
-func GeneratorExit(source Event) ErrorEvent {
-	return NewErrorEvent(source, ExitGenerator)
 }
 
 type NextFeatures struct {

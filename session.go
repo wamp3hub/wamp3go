@@ -350,10 +350,8 @@ func NewRemoteGenerator[O, I any](
 	inPayload I,
 ) (*remoteGenerator[O], error) {
 	logData := slog.Group("generator", "URI", features.URI)
-
 	session.logger.Debug("trying to initialize remote generator", logData)
 	pendingResponse := Call[NewGeneratorPayload](session, features, inPayload)
-
 	yieldEvent, generator, e := pendingResponse.Await()
 	if e == nil {
 		logData = slog.Group("generator", "ID", generator.ID, "URI", features.URI)
@@ -362,13 +360,13 @@ func NewRemoteGenerator[O, I any](
 			generator.ID,
 			yieldEvent.ID(),
 			session.peer,
-			session.logger.With(logData),
+			session.logger.With("name", "RemoteGenerator", logData),
 		}
 		session.logger.Debug("remote generator successfully initialized", logData)
 		return &instance, nil
 	}
 
-	session.logger.Error("during initialization", "error", e, logData)
+	session.logger.Error("during initialize remote generator", "error", e, logData)
 	return nil, e
 }
 
@@ -422,6 +420,7 @@ func (generator *remoteGenerator[T]) Stop() error {
 	}
 
 	generator.done = true
+
 	stopEvent := NewStopEvent(generator.ID)
 	e := generator.peer.Send(stopEvent)
 	if e == nil {
@@ -437,22 +436,25 @@ func yieldNext(
 	generatorID string,
 	lifetime time.Duration,
 	yieldEvent YieldEvent,
+	__logger *slog.Logger,
 ) NextEvent {
-	logData := slog.Group(
-		"yieldEvent",
-		"ID", yieldEvent.ID(),
-		"GeneratorID", generatorID,
-		"GeneratorLifetime", lifetime,
+	logger := __logger.With(
+		slog.Group(
+			"yieldEvent",
+			"ID", yieldEvent.ID(),
+			"GeneratorID", generatorID,
+			"GeneratorLifetime", lifetime,
+		),
 	)
 
 	nextEventPromise, cancelNextEventPromise := peer.PendingNextEvents.New(yieldEvent.ID(), 0)
 
 	stopEventPromise, cancelStopEventPromise := peer.PendingCancelEvents.New(generatorID, lifetime)
 
-	peer.logger.Debug("trying to send yield event", logData)
+	logger.Debug("trying to send yield event",)
 	e := peer.Send(yieldEvent)
 	if e != nil {
-		peer.logger.Error("during send yield event (destroying generator)", "error", e, logData)
+		peer.logger.Error("during send yield event (destroying generator)", "error", e,)
 		cancelNextEventPromise()
 		cancelStopEventPromise()
 		panic("something went wrong")
@@ -461,15 +463,15 @@ func yieldNext(
 	select {
 	case _, done := <-stopEventPromise:
 		if done {
-			peer.logger.Warn("generator stop event received (destroying generator)", logData)
+			logger.Warn("generator stop event received (destroying generator)",)
 		} else {
-			peer.logger.Warn("generator lifetime expired (destroying generator)", logData)
+			logger.Warn("generator lifetime expired (destroying generator)",)
 		}
 		cancelNextEventPromise()
 		panic("generator destroy")
 	case nextEvent := <-nextEventPromise:
 		cancelStopEventPromise()
-		peer.logger.Debug("continue", "nextEvent.ID", nextEvent.ID(), logData)
+		logger.Debug("continue", "nextEvent.ID", nextEvent.ID(),)
 		return nextEvent
 	}
 }
@@ -479,6 +481,10 @@ func Yield[I any](
 	inPayload I,
 ) NextEvent {
 	peer := source.getPeer()
+	logger := peer.logger.With(
+		"name", "Yield",
+		"sourceEvent.Kind", source.Kind(),
+	)
 
 	lifetime := DEFAULT_GENERATOR_LIFETIME * time.Second
 
@@ -486,16 +492,20 @@ func Yield[I any](
 	if ok {
 		generator := NewGeneratorPayload{wampShared.NewID()}
 		yieldEvent := newYieldEvent(callEvent, generator)
-		source = yieldNext(peer, generator.ID, lifetime, yieldEvent)
+		source = yieldNext(peer, generator.ID, lifetime, yieldEvent, logger)
 	}
 
 	nextEvent, ok := source.(NextEvent)
 	if ok {
 		nextFeatures := nextEvent.Features()
 		yieldEvent := newYieldEvent(nextEvent, inPayload)
-		return yieldNext(peer, nextFeatures.GeneratorID, lifetime, yieldEvent)
+		return yieldNext(peer, nextFeatures.GeneratorID, lifetime, yieldEvent, logger)
 	}
 
-	peer.logger.Error("invalid source event (destroying generator)", "sourceEvent.Kind", source.Kind())
+	logger.Error("invalid source event (destroying generator)")
 	panic("invalid source event")
+}
+
+func GeneratorExit(source Event) *generatorExitException {
+	return &generatorExitException{source}
 }
