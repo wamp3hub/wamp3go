@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net"
+	"time"
 
 	wamp "github.com/wamp3hub/wamp3go"
 )
@@ -86,9 +87,13 @@ type UnixClientMessage struct {
 
 func UnixConnect(
 	path string,
+	timeout time.Duration,
 	serializer wamp.Serializer,
 ) (*unixTransport, error) {
-	connection, e := net.Dial("unix", path)
+	if timeout == 0 {
+		timeout = time.Minute
+	}
+	connection, e := net.DialTimeout("unix", path, timeout)
 	if e == nil {
 		transport := UnixTransport(serializer, connection)
 		return transport, nil
@@ -98,6 +103,7 @@ func UnixConnect(
 
 type UnixJoinOptions struct {
 	Path           string
+	DialTimeout    time.Duration
 	Serializer     wamp.Serializer
 	LoggingHandler slog.Handler
 }
@@ -109,7 +115,7 @@ func UnixJoin(
 	joinOptionsLogData := slog.Group("JoinOptions", "Path", joinOptions.Path, "Serializer", joinOptions.Serializer.Code())
 	logger.Debug("trying to join", joinOptionsLogData)
 
-	transport, e := UnixConnect(joinOptions.Path, joinOptions.Serializer)
+	transport, e := UnixConnect(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer)
 	if e != nil {
 		logger.Error("failed to connect unix server", "error", e, joinOptionsLogData)
 		return nil, e

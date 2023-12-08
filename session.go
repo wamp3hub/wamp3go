@@ -8,10 +8,6 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
-var (
-	ErrorCancelled = errors.New("Cancelled")
-)
-
 const DEFAULT_GENERATOR_LIFETIME = 3600
 
 type Session struct {
@@ -186,7 +182,7 @@ func Call[O, I any](
 		"Timeout", features.Timeout,
 	)
 
-	replyTimeout := time.Duration(2*features.Timeout)*time.Second
+	replyTimeout := time.Duration(2*features.Timeout) * time.Second
 	replyEventPromise, cancelReplyEventPromise := session.peer.PendingReplyEvents.New(
 		callEvent.ID(), replyTimeout,
 	)
@@ -250,7 +246,7 @@ func Subscribe(
 	return nil, e
 }
 
-func Register(
+func Register[O any](
 	session *Session,
 	uri string,
 	options *RegisterOptions,
@@ -267,7 +263,7 @@ func Register(
 
 	_, registration, e := pendingResponse.Await()
 	if e == nil {
-		endpoint := NewCallEventEndpoint(procedure, session.logger.With(logData))
+		endpoint := NewCallEventEndpoint[O](procedure, session.logger.With(logData))
 		session.Registrations[registration.ID] = endpoint
 		session.logger.Debug("new registration", logData)
 		return &registration, nil
@@ -283,7 +279,7 @@ func Unsubscribe(
 ) error {
 	logData := slog.Group("subscription", "ID", subscriptionID)
 	session.logger.Debug("trying to unsubscribe", logData)
-	pendingResponse := Call[any](
+	pendingResponse := Call[bool](
 		session,
 		&CallFeatures{URI: "wamp.router.unsubscribe"},
 		subscriptionID,
@@ -303,7 +299,7 @@ func Unregister(
 ) error {
 	logData := slog.Group("registration", "ID", registrationID)
 	session.logger.Debug("trying to unregister", logData)
-	pendingResponse := Call[any](
+	pendingResponse := Call[bool](
 		session,
 		&CallFeatures{URI: "wamp.router.unregister"},
 		registrationID,
@@ -393,7 +389,7 @@ func (generator *remoteGenerator[T]) Next(
 
 	nextFeatures := NextFeatures{generator.ID, generator.lastYieldID, timeout}
 	nextEvent := newNextEvent(&nextFeatures)
-	responseTimeout := time.Duration(2*timeout)*time.Second
+	responseTimeout := time.Duration(2*timeout) * time.Second
 	responsePromise, cancelResponsePromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), responseTimeout)
 	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
 	e = generator.peer.Send(nextEvent)

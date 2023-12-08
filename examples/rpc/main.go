@@ -35,7 +35,7 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := wamp.Register(
+	registration, e := wamp.Register[string](
 		session,
 		"net.example.greeting",
 		&wamp.RegisterOptions{},

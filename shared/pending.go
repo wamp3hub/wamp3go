@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+var ErrorPendingNotFound = errors.New("PendingNotFound")
+
 type PendingMap[T any] struct {
 	safeMap map[string]CompletePromise[T]
 	mutex   *sync.RWMutex
@@ -67,5 +69,5 @@ func (pendingMap PendingMap[T]) Complete(key string, value T) error {
 		completePending(value)
 		return nil
 	}
-	return errors.New("PendingNotFound")
+	return ErrorPendingNotFound
 }

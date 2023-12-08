@@ -7,6 +7,13 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
+var (
+	ErrorCancelled = errors.New("Cancelled")
+	ExitGenerator = errors.New("ExitGenerator")
+	InvalidPayload = errors.New("InvalidPayload")
+	ProcedureNotFound = errors.New("ProcedureNotFound")
+)
+
 type MessageKind int8
 
 const (
@@ -67,7 +74,7 @@ func (field *payloadEventField[T]) Payload(__v any) error {
 		*v = field.value
 		return nil
 	}
-	return errors.New("InvalidPayload")
+	return InvalidPayload
 }
 
 type routeEventField[T any] struct {
@@ -279,7 +286,7 @@ func NewStopEvent(generatorID string) StopEvent {
 }
 
 func GeneratorExit(source Event) ErrorEvent {
-	return NewErrorEvent(source, errors.New("GeneratorExit"))
+	return NewErrorEvent(source, ExitGenerator)
 }
 
 type NextFeatures struct {

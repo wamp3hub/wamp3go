@@ -37,7 +37,7 @@ func NewPublishEventEndpoint(
 
 type callEventEndpoint func(CallEvent) ReplyEvent
 
-func NewCallEventEndpoint(
+func NewCallEventEndpoint[O any](
 	procedure CallProcedure,
 	logger *slog.Logger,
 ) callEventEndpoint {
@@ -53,7 +53,8 @@ func NewCallEventEndpoint(
 				if isError {
 					replyEvent = NewErrorEvent(callEvent, e)
 				} else {
-					replyEvent = NewReplyEvent(callEvent, returning)
+					__returning := returning.(O)
+					replyEvent = NewReplyEvent(callEvent, __returning)
 				}
 			} else {
 				logger.Debug("during endpoint execution", "error", e)

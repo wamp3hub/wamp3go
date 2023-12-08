@@ -34,7 +34,7 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
-	registration, e := wamp.Register(
+	registration, e := wamp.Register[int](
 		session,
 		"example.reverse",
 		&wamp.RegisterOptions{},
