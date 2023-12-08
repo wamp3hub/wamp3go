@@ -40,10 +40,8 @@ func main() {
 		&wamp.RegisterOptions{},
 		func(n int, callEvent wamp.CallEvent) (int, error) {
 			source := wamp.Event(callEvent)
-			if e == nil {
-				for i := n; i > 0; i-- {
-					source = wamp.Yield(source, i)
-				}
+			for i := n; i > 0; i-- {
+				source = wamp.Yield(source, i)
 			}
 			return -1, wamp.GeneratorExit(source)
 		},
