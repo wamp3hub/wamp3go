@@ -9,48 +9,50 @@ var (
 	ErrorApplication = errors.New("ApplicationError")
 )
 
+type Encodable[T any] interface {
+	Encode() (T, error)
+}
+
 type Decodable interface {
 	Decode(v any) error
 }
 
-type eventSerializable interface {
-	Event
-	eventPayload
+type serializableEvent interface {
+	ID() string
+	Kind() MessageKind
+	Payload() any
 }
 
-func serializePayload[T any](event eventSerializable) (*T, error) {
-	v := event.Payload()
+func cast[T any](v any) (T, error) {
+	var payload T
+
 	decoder, ok := v.(Decodable)
-
-	if event.Kind() == MK_ERROR {
-		if ok {
-			payload := new(errorEventPayload)
-			e := decoder.Decode(payload)
-			if e == nil {
-				return nil, errors.New(payload.Message)
-			}
-		}
-
-		payload, ok := v.(errorEventPayload)
-		if ok {
-			return nil, errors.New(payload.Message)
-		}
-
-		return nil, errors.New("unexpected type")
-	}
-
 	if ok {
-		payload := new(T)
-		e := decoder.Decode(payload)
+		e := decoder.Decode(&payload)
 		return payload, e
 	}
 
-	payload, ok := v.(T)
+	__payload, ok := v.(T)
 	if ok {
-		return &payload, nil
+		return __payload, nil
+	}
+	return payload, errors.New("unexpected type")
+}
+
+func SerializePayload[T any](event serializableEvent) (T, error) {
+	var payload T
+
+	v := event.Payload()
+	if event.Kind() == MK_ERROR {
+		__payload, e := cast[errorEventPayload](v)
+		if e == nil {
+			e = errors.New(__payload.Message)
+		}
+		return payload, e
 	}
 
-	return nil, errors.New("unexpected type")
+	payload, e := cast[T](v)
+	return payload, e
 }
 
 type PublishProcedure[I any] func(I, PublishEvent)
@@ -63,7 +65,7 @@ func NewPublishEventEndpoint[I any](
 ) publishEventEndpoint {
 	logger := __logger.With("name", "PublishEventEndpoint")
 	return func(publishEvent PublishEvent) {
-		payload, e := serializePayload[I](publishEvent)
+		payload, e := SerializePayload[I](publishEvent)
 		if e == nil {
 			finally := func() {
 				e := recover()
@@ -76,7 +78,7 @@ func NewPublishEventEndpoint[I any](
 	
 			defer finally()
 	
-			procedure(*payload, publishEvent)
+			procedure(payload, publishEvent)
 		} else {
 			logger.Warn("during serialize payload", "error", e)
 		}
@@ -101,7 +103,7 @@ func NewCallEventEndpoint[I, O any](
 ) callEventEndpoint {
 	logger := __logger.With("name", "CallEventEndpoint")
 	return func(callEvent CallEvent) (replyEvent ReplyEvent) {
-		payload, e := serializePayload[I](callEvent)
+		payload, e := SerializePayload[I](callEvent)
 		if e != nil {
 			logger.Warn("during serialize payload", "error", e)
 			replyEvent = NewErrorEvent(callEvent, InvalidPayload)
@@ -134,7 +136,7 @@ func NewCallEventEndpoint[I, O any](
 
 		defer finally()
 
-		returnValue, returnError = procedure(*payload, callEvent)
+		returnValue, returnError = procedure(payload, callEvent)
 		return replyEvent
 	}
 }

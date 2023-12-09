@@ -149,13 +149,15 @@ func (pendingResponse *PendingResponse[T]) Cancel() {
 
 func (pendingResponse *PendingResponse[T]) Await() (ReplyEvent, T, error) {
 	pendingResponse.lock()
+
 	replyEvent, promiseCompleted := <-pendingResponse.promise
 	if promiseCompleted {
-		payload, e := serializePayload[T](replyEvent)
-		return replyEvent, *payload, e
+		payload, e := SerializePayload[T](replyEvent)
+		return replyEvent, payload, e
 	}
-	var payload T
-	return nil, payload, ErrorTimedOut
+
+	var __ T
+	return nil, __, ErrorTimedOut
 }
 
 func Call[O, I any](
@@ -397,7 +399,7 @@ func (generator *remoteGenerator[T]) Next(
 		generator.logger.Debug("yield event successfully received", logData)
 		generator.lastYieldID = response.ID()
 	} else {
-		generator.logger.Error("destroying generator", "error", e)
+		generator.logger.Debug("destroying generator", "error", e)
 		generator.done = true
 		// TODO handle
 	}

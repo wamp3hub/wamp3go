@@ -36,7 +36,7 @@ func main() {
 
 	registration, e := wamp.Register(
 		session,
-		"example.reverse",
+		"net.example.reverse",
 		&wamp.RegisterOptions{},
 		func(n int, callEvent wamp.CallEvent) (int, error) {
 			source := wamp.Event(callEvent)
@@ -54,7 +54,7 @@ func main() {
 
 	generator, e := wamp.NewRemoteGenerator[int](
 		session,
-		&wamp.CallFeatures{URI: "example.reverse"},
+		&wamp.CallFeatures{URI: "net.example.reverse"},
 		100,
 	)
 	if e != nil {

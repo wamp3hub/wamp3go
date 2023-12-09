@@ -12,6 +12,10 @@ type JSONPayloadField struct {
 	Value json.RawMessage
 }
 
+func (field *JSONPayloadField) Encode() (json.RawMessage, error) {
+	return field.Value, nil
+}
+
 func (field *JSONPayloadField) Decode(v any) error {
 	return json.Unmarshal(field.Value, v)
 }
@@ -39,7 +43,13 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 			Features *wamp.ReplyFeatures `json:"features"`
 			Payload  any                 `json:"payload"`
 		}
-		message := jsonReplyMessage{event.ID(), event.Kind(), event.Features(), event.Payload()}
+		payload := event.Payload()
+		encoder, ok := payload.(wamp.Encodable[json.RawMessage])
+		if ok {
+			// TODO check error
+			payload, _ = encoder.Encode()
+		}
+		message := jsonReplyMessage{event.ID(), event.Kind(), event.Features(), payload}
 		return json.Marshal(message)
 	case wamp.PublishEvent:
 		type jsonPublishMessage struct {
@@ -49,7 +59,13 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 			Payload  any                   `json:"payload"`
 			Route    *wamp.PublishRoute    `json:"route"`
 		}
-		message := jsonPublishMessage{event.ID(), event.Kind(), event.Features(), event.Payload(), event.Route()}
+		payload := event.Payload()
+		encoder, ok := payload.(wamp.Encodable[json.RawMessage])
+		if ok {
+			// TODO check error
+			payload, _ = encoder.Encode()
+		}
+		message := jsonPublishMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
 		return json.Marshal(message)
 	case wamp.CallEvent:
 		type jsonCallMessage struct {
@@ -59,7 +75,13 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 			Payload  any                `json:"payload"`
 			Route    *wamp.CallRoute    `json:"route"`
 		}
-		message := jsonCallMessage{event.ID(), event.Kind(), event.Features(), event.Payload(), event.Route()}
+		payload := event.Payload()
+		encoder, ok := payload.(wamp.Encodable[json.RawMessage])
+		if ok {
+			// TODO check error
+			payload, _ = encoder.Encode()
+		}
+		message := jsonCallMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
 		return json.Marshal(message)
 	case wamp.NextEvent:
 		type jsonNextMessage struct {
