@@ -502,6 +502,14 @@ func Yield[I any](
 	panic("invalid source event")
 }
 
+type generatorExitException struct {
+	Source Event
+}
+
+func (generatorExitException) Error() string {
+	return "GeneratorExit"
+}
+
 func GeneratorExit(source Event) *generatorExitException {
 	return &generatorExitException{source}
 }
