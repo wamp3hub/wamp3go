@@ -2,18 +2,8 @@ package wamp
 
 import "errors"
 
-type Encodable[T any] interface {
-	Encode() (T, error)
-}
-
 type Decodable interface {
 	Decode(v any) error
-}
-
-type serializableEvent interface {
-	ID() string
-	Kind() MessageKind
-	Payload() any
 }
 
 func cast[T any](v any) (T, error) {
@@ -33,7 +23,13 @@ func cast[T any](v any) (T, error) {
 	return payload, errors.New("unexpected type")
 }
 
-func SerializePayload[T any](event serializableEvent) (T, error) {
+type readableEventPayload interface {
+	ID() string
+	Kind() MessageKind
+	Payload() any
+}
+
+func ReadPayload[T any](event readableEventPayload) (T, error) {
 	v := event.Payload()
 	if event.Kind() == MK_ERROR {
 		__payload, e := cast[errorEventPayload](v)

@@ -19,7 +19,7 @@ func NewPublishEventEndpoint[I any](
 ) publishEventEndpoint {
 	logger := __logger.With("name", "PublishEventEndpoint")
 	return func(publishEvent PublishEvent) {
-		payload, e := SerializePayload[I](publishEvent)
+		payload, e := ReadPayload[I](publishEvent)
 		if e == nil {
 			finally := func() {
 				e := recover()
@@ -29,9 +29,9 @@ func NewPublishEventEndpoint[I any](
 					logger.Debug("during endpoint execution", "error", e)
 				}
 			}
-	
+
 			defer finally()
-	
+
 			procedure(payload, publishEvent)
 		} else {
 			logger.Warn("during serialize payload", "error", e)
@@ -49,7 +49,7 @@ func NewCallEventEndpoint[I, O any](
 ) callEventEndpoint {
 	logger := __logger.With("name", "CallEventEndpoint")
 	return func(callEvent CallEvent) (replyEvent ReplyEvent) {
-		payload, e := SerializePayload[I](callEvent)
+		payload, e := ReadPayload[I](callEvent)
 		if e != nil {
 			logger.Warn("during serialize payload", "error", e)
 			replyEvent = NewErrorEvent(callEvent, InvalidPayload)

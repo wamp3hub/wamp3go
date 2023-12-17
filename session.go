@@ -152,7 +152,7 @@ func (pendingResponse *PendingResponse[T]) Await() (ReplyEvent, T, error) {
 
 	replyEvent, promiseCompleted := <-pendingResponse.promise
 	if promiseCompleted {
-		payload, e := SerializePayload[T](replyEvent)
+		payload, e := ReadPayload[T](replyEvent)
 		return replyEvent, payload, e
 	}
 
