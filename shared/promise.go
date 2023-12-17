@@ -7,11 +7,11 @@ import (
 
 type Promise[T any] <-chan T
 
-type Completable[T any] func(T)
+type CompletePromise[T any] func(T)
 
-type Cancellable func()
+type CancelPromise func()
 
-func NewPromise[T any](timeout time.Duration) (Promise[T], Completable[T], Cancellable) {
+func NewTimelessPromise[T any]() (Promise[T], CompletePromise[T], CancelPromise) {
 	channel := make(chan T, 1)
 
 	once := new(sync.Once)
@@ -28,12 +28,20 @@ func NewPromise[T any](timeout time.Duration) (Promise[T], Completable[T], Cance
 		cancel()
 	}
 
-	await := func() {
-		<-time.After(timeout)
-		cancel()
+	return channel, complete, cancel
+}
+
+func NewPromise[T any](timeout time.Duration) (Promise[T], CompletePromise[T], CancelPromise) {
+	promise, complete, cancel := NewTimelessPromise[T]()
+
+	if timeout > 0 {
+		await := func() {
+			<-time.After(timeout)
+			cancel()
+		}
+
+		go await()
 	}
 
-	go await()
-
-	return channel, complete, cancel
+	return promise, complete, cancel
 }

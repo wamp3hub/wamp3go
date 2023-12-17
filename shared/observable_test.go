@@ -7,12 +7,12 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
-func TestHappyPathStream(t *testing.T) {
+func TestObservableHappyPath(t *testing.T) {
 	wg := new(sync.WaitGroup)
 
-	consume, produce, close := wampShared.NewStream[string]()
+	events := wampShared.NewObservable[string]()
 
-	consume(
+	events.Observe(
 		func(v string) {
 			t.Logf("alpha: %s", v)
 			wg.Done()
@@ -23,7 +23,7 @@ func TestHappyPathStream(t *testing.T) {
 		},
 	)
 
-	consume(
+	events.Observe(
 		func(v string) {
 			t.Logf("beta: %s", v)
 			wg.Done()
@@ -44,11 +44,11 @@ func TestHappyPathStream(t *testing.T) {
 
 	wg.Add(len(testData) * 2)
 	for _, v := range testData {
-		produce(v)
+		events.Next(v)
 	}
 	wg.Wait()
 
 	wg.Add(2)
-	close()
+	events.Complete()
 	wg.Wait()
 }
