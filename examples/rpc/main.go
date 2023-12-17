@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
@@ -16,10 +18,16 @@ func main() {
 	}
 
 	session, e := wampTransports.WebsocketJoin(
-		"0.0.0.0:8888",
-		false,
-		wampSerializers.DefaultSerializer,
-		&LoginPayload{"test", "test"},
+		&wampTransports.WebsocketJoinOptions{
+			Secure: false,
+			Address: "0.0.0.0:8888",
+			Serializer: wampSerializers.DefaultSerializer,
+			Credentials: &LoginPayload{"test", "test"},
+			LoggingHandler: slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
+			),
+		},
 	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success\n")
@@ -29,24 +37,27 @@ func main() {
 
 	registration, e := wamp.Register(
 		session,
-		"example.greeting",
+		"net.example.greeting",
 		&wamp.RegisterOptions{},
-		func(callEvent wamp.CallEvent) wamp.ReplyEvent {
-			name := ""
-			e := callEvent.Payload(&name)
-			if e == nil {
-				return wamp.NewReplyEvent(callEvent, "Hello, "+name+"!")
+		func(name string, callEvent wamp.CallEvent) (string, error) {
+			if len(name) == 0 {
+				return "", errors.New("InvalidName")
 			}
-			return wamp.NewErrorEvent(callEvent, errors.New("InvalidName"))
+			result := "Hello, "+name+"!"
+			return result, nil
 		},
 	)
 	if e == nil {
 		fmt.Printf("register success ID=%s\n", registration.ID)
 	} else {
-		panic("RegisterError")
+		panic("register error")
 	}
 
-	pendingResponse := wamp.Call[string](session, &wamp.CallFeatures{URI: "example.greeting"}, "WAMP")
+	pendingResponse := wamp.Call[string](
+		session,
+		&wamp.CallFeatures{URI: "net.example.greeting"},
+		"WAMP",
+	)
 	_, v, e := pendingResponse.Await()
 	if e == nil {
 		fmt.Printf("call(example.greeting) %s\n", v)

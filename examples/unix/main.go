@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -21,21 +23,31 @@ func main() {
 	wg := new(sync.WaitGroup)
 	wg.Add(2)
 
-	session, e := wampTransports.UnixJoin(*unixPath, wampSerializers.DefaultSerializer)
+	session, e := wampTransports.UnixJoin(
+		&wampTransports.UnixJoinOptions{
+			Path:       "/tmp/wamp.socket",
+			Serializer: wampSerializers.DefaultSerializer,
+			LoggingHandler: slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
+			),
+		},
+	)
 	if e == nil {
 		fmt.Printf("WAMP Join Success session.ID=%s\n", session.ID())
 	} else {
 		panic("WAMP Join Error")
 	}
 
-	onEcho := func(publishEvent wamp.PublishEvent) {
-		payload := ""
-		publishEvent.Payload(&payload)
-		fmt.Printf("new message %s\n", payload)
-		wg.Done()
-	}
-
-	wamp.Subscribe(session, "example.echo", &wamp.SubscribeOptions{}, onEcho)
+	wamp.Subscribe(
+		session,
+		"example.echo",
+		&wamp.SubscribeOptions{},
+		func(message string, publishEvent wamp.PublishEvent) {
+			fmt.Printf("new message %s\n", message)
+			wg.Done()
+		},
+	)
 
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "Hello, WAMP!")
 	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "How are you?")

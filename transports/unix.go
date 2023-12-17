@@ -3,8 +3,9 @@ package wampTransports
 import (
 	"bufio"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net"
+	"time"
 
 	wamp "github.com/wamp3hub/wamp3go"
 )
@@ -26,6 +27,23 @@ func UnixTransport(
 	}
 }
 
+func (transport *unixTransport) initialize() (string, string, error) {
+	serverMessage := new(UnixServerMessage)
+	rawServerMessage, e := transport.ReadRaw()
+	if e == nil {
+		e = json.Unmarshal(rawServerMessage, serverMessage)
+		if e == nil {
+			clientMessage := UnixClientMessage{transport.Serializer.Code()}
+			rawClientMessage, _ := json.Marshal(clientMessage)
+			e = transport.WriteRaw(rawClientMessage)
+			if e == nil {
+				return serverMessage.RouterID, serverMessage.YourID, nil
+			}
+		}
+	}
+	return "", "", e
+}
+
 func (transport *unixTransport) Close() error {
 	e := transport.Connection.Close()
 	return e
@@ -34,14 +52,6 @@ func (transport *unixTransport) Close() error {
 func (transport *unixTransport) WriteRaw(data []byte) error {
 	data = append(data, byte('\n'))
 	_, e := transport.Connection.Write(data)
-	return e
-}
-
-func (transport *unixTransport) WriteJSON(payload any) error {
-	rawMessage, e := json.Marshal(payload)
-	if e == nil {
-		e = transport.WriteRaw(rawMessage)
-	}
 	return e
 }
 
@@ -58,23 +68,12 @@ func (transport *unixTransport) ReadRaw() ([]byte, error) {
 	return rawMessage, e
 }
 
-func (transport *unixTransport) ReadJSON(payload any) error {
-	rawMessage, e := transport.ReadRaw()
-	if e == nil {
-		e = json.Unmarshal(rawMessage, payload)
-	}
-	return e
-}
-
 func (transport *unixTransport) Read() (event wamp.Event, e error) {
 	rawMessage, e := transport.ReadRaw()
 	if e == nil {
-		event, e = transport.Serializer.Decode(rawMessage)
-		if e == nil {
-			return event, nil
-		}
+		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, e
+	return nil, wamp.ErrorConnectionLost
 }
 
 type UnixServerMessage struct {
@@ -88,36 +87,47 @@ type UnixClientMessage struct {
 
 func UnixConnect(
 	path string,
+	timeout time.Duration,
 	serializer wamp.Serializer,
-) (wamp.Transport, string, error) {
-	log.Printf("[unix] dial %s", path)
-	connection, e := net.Dial("unix", path)
+) (*unixTransport, error) {
+	if timeout == 0 {
+		timeout = time.Minute
+	}
+	connection, e := net.DialTimeout("unix", path, timeout)
 	if e == nil {
 		transport := UnixTransport(serializer, connection)
-		serverMessage := new(UnixServerMessage)
-		e = transport.ReadJSON(serverMessage)
-		if e == nil {
-			clientMessage := UnixClientMessage{serializer.Code()}
-			e = transport.WriteJSON(clientMessage)
-			if e == nil {
-				return transport, serverMessage.YourID, nil
-			}
-		}
+		return transport, nil
 	}
-	return nil, "", e
+	return nil, e
+}
+
+type UnixJoinOptions struct {
+	Path           string
+	DialTimeout    time.Duration
+	Serializer     wamp.Serializer
+	LoggingHandler slog.Handler
 }
 
 func UnixJoin(
-	path string,
-	serializer wamp.Serializer,
+	joinOptions *UnixJoinOptions,
 ) (*wamp.Session, error) {
-	log.Printf("[unix] trying to join %s", path)
-	transport, peerID, e := UnixConnect(path, serializer)
+	logger := slog.New(joinOptions.LoggingHandler)
+	joinOptionsLogData := slog.Group("JoinOptions", "Path", joinOptions.Path, "Serializer", joinOptions.Serializer.Code())
+	logger.Debug("trying to join", joinOptionsLogData)
+
+	transport, e := UnixConnect(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer)
+	if e != nil {
+		logger.Error("failed to connect unix server", "error", e, joinOptionsLogData)
+		return nil, e
+	}
+
+	routerID, peerID, e := transport.initialize()
 	if e == nil {
-		peer := wamp.SpawnPeer(peerID, transport)
-		session := wamp.NewSession(peer)
-		log.Printf("[unix] peer.ID=%s joined to %s", peer.ID, path)
+		peer := wamp.SpawnPeer(peerID, transport, logger)
+		session := wamp.NewSession(peer, logger)
+		logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, joinOptionsLogData)
 		return session, nil
 	}
+	logger.Error("failed to initialize unix transport", "error", e, joinOptionsLogData)
 	return nil, e
 }
