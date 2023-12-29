@@ -2,6 +2,7 @@ package wamp
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
@@ -231,15 +232,15 @@ func Subscribe[I any](
 	)
 
 	_, subscription, e := pendingResponse.Await()
-	if e == nil {
-		endpoint := NewPublishEventEndpoint[I](procedure, session.logger)
-		session.Subscriptions[subscription.ID] = endpoint
-		session.logger.Debug("new subscription", logData)
-		return subscription, nil
+	if e != nil {
+		session.logger.Error("during subscribe", "error", e, logData)
+		return nil, e
 	}
 
-	session.logger.Error("during subscribe", "error", e, logData)
-	return nil, e
+	endpoint := NewPublishEventEndpoint[I](procedure, session.logger)
+	session.Subscriptions[subscription.ID] = endpoint
+	session.logger.Debug("new subscription", logData)
+	return subscription, nil
 }
 
 func Register[I, O any](
@@ -258,15 +259,20 @@ func Register[I, O any](
 	)
 
 	_, registration, e := pendingResponse.Await()
-	if e == nil {
-		endpoint := NewCallEventEndpoint[I, O](procedure, session.logger)
-		session.Registrations[registration.ID] = endpoint
-		session.logger.Debug("new registration", logData)
-		return registration, nil
+	if e != nil {
+		session.logger.Error("during register", "error", e, logData)
+		return nil, e
 	}
 
-	session.logger.Error("during register", "error", e, logData)
-	return nil, e
+	endpoint := NewCallEventEndpoint[I, O](procedure, session.logger)
+	session.Registrations[registration.ID] = endpoint
+	session.logger.Debug("new registration", logData)
+
+	if !strings.HasSuffix(uri, "__schema__") {
+		registerSchema[I, O](session, uri, options)
+	}
+
+	return registration, nil
 }
 
 func Unsubscribe(

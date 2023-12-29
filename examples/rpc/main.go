@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
@@ -19,9 +20,9 @@ func main() {
 
 	session, e := wampTransports.WebsocketJoin(
 		&wampTransports.WebsocketJoinOptions{
-			Secure: false,
-			Address: "0.0.0.0:8888",
-			Serializer: wampSerializers.DefaultSerializer,
+			Secure:      false,
+			Address:     "0.0.0.0:8800",
+			Serializer:  wampSerializers.DefaultSerializer,
 			Credentials: &LoginPayload{"test", "test"},
 			LoggingHandler: slog.NewTextHandler(
 				os.Stdout,
@@ -35,15 +36,18 @@ func main() {
 		panic("WAMP Join Error")
 	}
 
+	wg := new(sync.WaitGroup)
+
 	registration, e := wamp.Register(
 		session,
 		"net.example.greeting",
-		&wamp.RegisterOptions{},
+		&wamp.RegisterOptions{Description: "greeting"},
 		func(name string, callEvent wamp.CallEvent) (string, error) {
+			wg.Done()
 			if len(name) == 0 {
 				return "", errors.New("InvalidName")
 			}
-			result := "Hello, "+name+"!"
+			result := "Hello, " + name + "!"
 			return result, nil
 		},
 	)
@@ -53,15 +57,33 @@ func main() {
 		panic("register error")
 	}
 
-	pendingResponse := wamp.Call[string](
-		session,
-		&wamp.CallFeatures{URI: "net.example.greeting"},
-		"WAMP",
-	)
-	_, v, e := pendingResponse.Await()
-	if e == nil {
-		fmt.Printf("call(example.greeting) %s\n", v)
-	} else {
-		fmt.Printf("call(example.greeting) %s\n", e)
+	type ProjectPayload struct {
+		Name string `json:"name"`
 	}
+
+	type CreateUserPayload struct {
+		Age      int              `json:"age"`
+		Name     string           `json:"name" jsonschema:"default=lucy"`
+		Password string           `json:"password"`
+		Roles    []string         `json:"roles"`
+		Projects []ProjectPayload `json:"projects"`
+	}
+
+	registration, e = wamp.Register(
+		session,
+		"net.example.user.create",
+		&wamp.RegisterOptions{Description: "creates new user"},
+		func(payload CreateUserPayload, callEvent wamp.CallEvent) (CreateUserPayload, error) {
+			wg.Done()
+			return payload, nil
+		},
+	)
+	if e == nil {
+		fmt.Printf("register success ID=%s\n", registration.ID)
+	} else {
+		panic("register error")
+	}
+
+	wg.Add(100)
+	wg.Wait()
 }

@@ -316,7 +316,8 @@ func (resource *Resource[T]) Native() bool {
 }
 
 type resourceOptions struct {
-	Route []string `json:"route"`
+	Description string   `json:"description"`
+	Route       []string `json:"route"`
 }
 
 func (options *resourceOptions) Entrypoint() string {
