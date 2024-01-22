@@ -7,27 +7,28 @@ import (
 	"github.com/gorilla/websocket"
 
 	wamp "github.com/wamp3hub/wamp3go"
+	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 	wampInterview "github.com/wamp3hub/wamp3go/transports/interview"
 )
 
-type wsTransport struct {
-	Serializer wamp.Serializer
-	Connection *websocket.Conn
+type WSTransport struct {
+	Address              string
+	Serializer           wamp.Serializer
+	Connection           *websocket.Conn
 }
 
-func WSTransport(
-	serializer wamp.Serializer,
-	connection *websocket.Conn,
-) *wsTransport {
-	return &wsTransport{serializer, connection}
+func (transport *WSTransport) Connect() (e error) {
+	transport.Connection, _, e = websocket.DefaultDialer.Dial(transport.Address, nil)
+	return e
 }
 
-func (transport *wsTransport) Close() error {
+func (transport *WSTransport) Close() error {
 	e := transport.Connection.Close()
 	return e
 }
 
-func (transport *wsTransport) Write(event wamp.Event) error {
+func (transport *WSTransport) Write(event wamp.Event) error {
 	rawMessage, e := transport.Serializer.Encode(event)
 	if e == nil {
 		e = transport.Connection.WriteMessage(websocket.TextMessage, rawMessage)
@@ -35,7 +36,7 @@ func (transport *wsTransport) Write(event wamp.Event) error {
 	return e
 }
 
-func (transport *wsTransport) Read() (wamp.Event, error) {
+func (transport *WSTransport) Read() (wamp.Event, error) {
 	_, rawMessage, e := transport.Connection.ReadMessage()
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
@@ -43,31 +44,32 @@ func (transport *wsTransport) Read() (wamp.Event, error) {
 	return nil, wamp.ErrorConnectionLost
 }
 
-func WebsocketConnect(
-	address string,
-	serializer wamp.Serializer,
-) (*wsTransport, error) {
-	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
-	if e == nil {
-		transport := WSTransport(serializer, connection)
-		return transport, nil
-	}
-	return nil, e
-}
-
 type WebsocketJoinOptions struct {
-	Secure         bool
-	Address        string
-	Serializer     wamp.Serializer
-	Credentials    any
-	LoggingHandler slog.Handler
+	Secure               bool
+	Address              string
+	Serializer           wamp.Serializer
+	Credentials          any
+	LoggingHandler       slog.Handler
+	ReconnectionStrategy wampShared.RetryStrategy
 }
 
 func WebsocketJoin(
 	joinOptions *WebsocketJoinOptions,
 ) (*wamp.Session, error) {
+	if joinOptions.Serializer == nil {
+		joinOptions.Serializer = wampSerializers.DefaultSerializer
+	}
+	if joinOptions.ReconnectionStrategy == nil {
+		joinOptions.ReconnectionStrategy = wampShared.DefaultRetryStrategy
+	}
+
 	logger := slog.New(joinOptions.LoggingHandler)
-	joinOptionsLogData := slog.Group("joinOptions", "address", joinOptions.Address, "secure", joinOptions.Secure, "serializer", joinOptions.Serializer.Code())
+	joinOptionsLogData := slog.Group(
+		"joinOptions",
+		"address", joinOptions.Address,
+		"secure", joinOptions.Secure,
+		"serializer", joinOptions.Serializer.Code(),
+	)
 	logger.Debug("trying to join", joinOptionsLogData)
 
 	payload, e := wampInterview.HTTP2Interview(
@@ -76,7 +78,7 @@ func WebsocketJoin(
 		&wampInterview.Payload{Credentials: joinOptions.Credentials},
 	)
 	if e != nil {
-		logger.Error("interview failed", "error", e, joinOptionsLogData)
+		logger.Error("during interview", "error", e, joinOptionsLogData)
 		return nil, e
 	}
 
@@ -91,14 +93,15 @@ func WebsocketJoin(
 		"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
 		protocol, joinOptions.Address, payload.Ticket, joinOptions.Serializer.Code(),
 	)
-	transport, e := WebsocketConnect(wsAddress, joinOptions.Serializer)
+	transport := WSTransport{Address: wsAddress, Serializer: joinOptions.Serializer}
+	e = transport.Connect()
 	if e == nil {
-		peer := wamp.SpawnPeer(payload.YourID, transport, logger)
+		peer := wamp.SpawnPeer(payload.YourID, &transport, joinOptions.ReconnectionStrategy, logger)
 		session := wamp.NewSession(peer, logger)
 		logger.Debug("successful joined", joinOptionsLogData, interviewLogData)
 		return session, nil
 	}
 
-	logger.Error("join failed", "error", e, joinOptionsLogData, interviewLogData)
+	logger.Error("during connect", "error", e, joinOptionsLogData, interviewLogData)
 	return nil, e
 }

@@ -1,6 +1,7 @@
 package wamp
 
 import (
+	"errors"
 	"log/slog"
 	"time"
 
@@ -9,31 +10,35 @@ import (
 
 const DEFAULT_GENERATOR_LIFETIME = 3600
 
+var ErrorDispatch = errors.New("dispatch error")
+
 type Session struct {
 	Subscriptions map[string]publishEventEndpoint
 	Registrations map[string]callEventEndpoint
-	peer          *Peer
+	restorables   map[string]func()
+	router        *Peer
 	logger        *slog.Logger
 }
 
 func (session *Session) ID() string {
-	return session.peer.ID
+	return session.router.ID
 }
 
 func NewSession(
-	peer *Peer,
+	router *Peer,
 	logger *slog.Logger,
 ) *Session {
 	session := Session{
 		make(map[string]publishEventEndpoint),
 		make(map[string]callEventEndpoint),
-		peer,
+		make(map[string]func()),
+		router,
 		logger.With(
-			slog.Group("session", "ID", peer.ID),
+			slog.Group("session", "ID", router.ID),
 		),
 	}
 
-	session.peer.IncomingPublishEvents.Observe(
+	session.router.IncomingPublishEvents.Observe(
 		func(publishEvent PublishEvent) {
 			features := publishEvent.Features()
 			route := publishEvent.Route()
@@ -52,14 +57,15 @@ func NewSession(
 				endpoint(publishEvent)
 			} else {
 				session.logger.Error("subscription not found", logData)
-
 				// TODO handle
 			}
 		},
-		func() {},
+		func() {
+			clear(session.Subscriptions)
+		},
 	)
 
-	session.peer.IncomingCallEvents.Observe(
+	session.router.IncomingCallEvents.Observe(
 		func(callEvent CallEvent) {
 			features := callEvent.Features()
 			route := callEvent.Route()
@@ -75,25 +81,36 @@ func NewSession(
 
 			endpoint, exists := session.Registrations[route.EndpointID]
 			if exists {
-				// TODO cancellation
-
 				replyEvent := endpoint(callEvent)
 
 				replyEventLogData := slog.Group("replyEvent", "ID", replyEvent.ID())
 
-				e := session.peer.Send(replyEvent)
-				if e == nil {
+				ok := session.router.Send(replyEvent, DEFAULT_RESEND_COUNT)
+				if ok {
 					session.logger.Debug("call event processed successfully", callEventLogData, replyEventLogData)
 				} else {
-					session.logger.Error("during send reply event", callEventLogData, replyEventLogData)
+					session.logger.Error("reply event dispatch error", callEventLogData, replyEventLogData)
 				}
 			} else {
 				session.logger.Error("registration not found", callEventLogData)
-
 				// TODO handle
 			}
 		},
-		func() {},
+		func() {
+			clear(session.Registrations)
+		},
+	)
+
+	session.router.ReJoinEvents.Observe(
+		func(__ struct{}) {
+			for name, restore := range session.restorables {
+				session.logger.Debug("restoring", "name", name)
+				restore()
+			}
+		},
+		func() {
+			clear(session.restorables)
+		},
 	)
 
 	return &session
@@ -113,13 +130,14 @@ func Publish[I any](
 	)
 
 	session.logger.Debug("trying to send call event", logData)
-	e := session.peer.Send(publishEvent)
-	if e == nil {
+	ok := session.router.Send(publishEvent, DEFAULT_RESEND_COUNT)
+	if ok {
 		session.logger.Debug("publication successfully sent", logData)
-	} else {
-		session.logger.Error("during send publication", "error", e, logData)
+		return nil
 	}
-	return e
+
+	session.logger.Error("publish event dispatch error", logData)
+	return ErrorDispatch
 }
 
 type PendingResponse[T any] struct {
@@ -179,18 +197,18 @@ func Call[O, I any](
 	)
 
 	replyTimeout := time.Duration(2*features.Timeout) * time.Second
-	replyEventPromise, cancelReplyEventPromise := session.peer.PendingReplyEvents.New(
+	replyEventPromise, cancelReplyEventPromise := session.router.PendingReplyEvents.New(
 		callEvent.ID(), replyTimeout,
 	)
 
 	cancelCallEvent := func() {
 		session.logger.Debug("trying to cancel invocation", logData)
 		cancelEvent := newCancelEvent(callEvent)
-		e := session.peer.Send(cancelEvent)
-		if e == nil {
+		ok := session.router.Send(cancelEvent, DEFAULT_RESEND_COUNT)
+		if ok {
 			session.logger.Debug("invocation successfully cancelled", logData)
 		} else {
-			session.logger.Error("during send cancel event", "error", e, logData)
+			session.logger.Error("call event dispatch error", logData)
 		}
 		cancelReplyEventPromise()
 	}
@@ -198,13 +216,13 @@ func Call[O, I any](
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 
 	session.logger.Debug("trying to send call event", logData)
-	e := session.peer.Send(callEvent)
-	if e == nil {
+	ok := session.router.Send(callEvent, DEFAULT_RESEND_COUNT)
+	if ok {
 		session.logger.Debug("call event successfully sent", logData)
 	} else {
-		session.logger.Error("during send call event", "error", e, logData)
-		errorEvent := NewErrorEvent(callEvent, e)
-		session.peer.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
+		session.logger.Error("call event dispatch error", logData)
+		errorEvent := NewErrorEvent(callEvent, ErrorDispatch)
+		session.router.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
 	}
 
 	return pendingResponse
@@ -219,7 +237,7 @@ func Subscribe[I any](
 	session *Session,
 	uri string,
 	options *SubscribeOptions,
-	procedure PublishProcedure[I],
+	procedure ProcedureToPublish[I],
 ) (*Subscription, error) {
 	logData := slog.Group("subscription", "URI", uri)
 	session.logger.Debug("trying to subscribe", logData)
@@ -235,6 +253,12 @@ func Subscribe[I any](
 		endpoint := NewPublishEventEndpoint[I](procedure, session.logger)
 		session.Subscriptions[subscription.ID] = endpoint
 		session.logger.Debug("new subscription", logData)
+
+		session.restorables[subscription.ID] = func() {
+			delete(session.Subscriptions, subscription.ID)
+			Subscribe[I](session, uri, options, procedure)
+		}
+
 		return subscription, nil
 	}
 
@@ -246,7 +270,7 @@ func Register[I, O any](
 	session *Session,
 	uri string,
 	options *RegisterOptions,
-	procedure CallProcedure[I, O],
+	procedure ProcedureToCall[I, O],
 ) (*Registration, error) {
 	logData := slog.Group("registration", "URI", uri)
 	session.logger.Debug("trying to register", logData)
@@ -262,6 +286,12 @@ func Register[I, O any](
 		endpoint := NewCallEventEndpoint[I, O](procedure, session.logger)
 		session.Registrations[registration.ID] = endpoint
 		session.logger.Debug("new registration", logData)
+
+		session.restorables[registration.ID] = func() {
+			delete(session.Registrations, registration.ID)
+			Register[I, O](session, uri, options, procedure)
+		}
+
 		return registration, nil
 	}
 
@@ -283,6 +313,7 @@ func Unsubscribe(
 	_, _, e := pendingResponse.Await()
 	if e == nil {
 		delete(session.Subscriptions, subscriptionID)
+		delete(session.restorables, subscriptionID)
 		session.logger.Debug("subscription successfully dettached", logData)
 	}
 	session.logger.Error("during unsubscribe", "error", e, logData)
@@ -303,6 +334,7 @@ func Unregister(
 	_, _, e := pendingResponse.Await()
 	if e == nil {
 		delete(session.Registrations, registrationID)
+		delete(session.restorables, registrationID)
 		session.logger.Debug("registration successfully dettached", logData)
 	}
 	session.logger.Error("during unregister", "error", e, logData)
@@ -315,7 +347,7 @@ func Leave(
 ) error {
 	logData := slog.Group("leave", "reason", reason)
 	session.logger.Debug("trying to leave", logData)
-	e := session.peer.Close()
+	e := session.router.Close()
 	if e == nil {
 		session.logger.Debug("session successfully left", logData)
 	} else {
@@ -355,7 +387,7 @@ func NewRemoteGenerator[O, I any](
 			false,
 			generator.ID,
 			yieldEvent.ID(),
-			session.peer,
+			session.router,
 			session.logger.With("name", "RemoteGenerator", logData),
 		}
 		session.logger.Debug("remote generator successfully initialized", logData)
@@ -377,7 +409,7 @@ func (generator *remoteGenerator[T]) Next(
 	generator.logger.Debug("trying to get next", logData)
 
 	if generator.done {
-		generator.logger.Error("generator already done")
+		generator.logger.Error("generator already done", logData)
 		panic("generator exit")
 	}
 
@@ -386,12 +418,12 @@ func (generator *remoteGenerator[T]) Next(
 	responseTimeout := time.Duration(2*timeout) * time.Second
 	responsePromise, cancelResponsePromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), responseTimeout)
 	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
-	e = generator.peer.Send(nextEvent)
-	if e != nil {
-		generator.logger.Error("during send next event", "error", e)
+	ok := generator.peer.Send(nextEvent, DEFAULT_RESEND_COUNT)
+	if !ok {
+		generator.logger.Error("next event dispatch error", logData)
 		cancelResponsePromise()
 		generator.done = true
-		return nil, outPayload, e
+		return nil, outPayload, ErrorDispatch
 	}
 
 	response, outPayload, e = pendingResponse.Await()
@@ -399,7 +431,7 @@ func (generator *remoteGenerator[T]) Next(
 		generator.logger.Debug("yield event successfully received", logData)
 		generator.lastYieldID = response.ID()
 	} else {
-		generator.logger.Debug("destroying generator", "error", e)
+		generator.logger.Debug("destroying generator", "error", e, logData)
 		generator.done = true
 		// TODO handle
 	}
@@ -415,20 +447,20 @@ func (generator *remoteGenerator[T]) Stop() error {
 		panic("generator exit")
 	}
 
-	generator.done = true
-
 	stopEvent := NewStopEvent(generator.ID)
-	e := generator.peer.Send(stopEvent)
-	if e == nil {
+	ok := generator.peer.Send(stopEvent, DEFAULT_RESEND_COUNT)
+	if ok {
+		generator.done = true
 		generator.logger.Debug("generator successfully stopped")
-	} else {
-		generator.logger.Error("during stop generator", "error", e)
+		return nil
 	}
-	return e
+
+	generator.logger.Error("generator stop event dispatch error")
+	return ErrorDispatch
 }
 
 func yieldNext(
-	peer *Peer,
+	router *Peer,
 	generatorID string,
 	lifetime time.Duration,
 	yieldEvent YieldEvent,
@@ -443,17 +475,17 @@ func yieldNext(
 		),
 	)
 
-	nextEventPromise, cancelNextEventPromise := peer.PendingNextEvents.New(yieldEvent.ID(), 0)
+	nextEventPromise, cancelNextEventPromise := router.PendingNextEvents.New(yieldEvent.ID(), 0)
 
-	stopEventPromise, cancelStopEventPromise := peer.PendingCancelEvents.New(generatorID, lifetime)
+	stopEventPromise, cancelStopEventPromise := router.PendingCancelEvents.New(generatorID, lifetime)
 
 	logger.Debug("trying to send yield event")
-	e := peer.Send(yieldEvent)
-	if e != nil {
-		peer.logger.Error("during send yield event (destroying generator)", "error", e)
+	ok := router.Send(yieldEvent, DEFAULT_RESEND_COUNT)
+	if !ok {
+		logger.Error("yield event dispatch error (destroying generator)")
 		cancelNextEventPromise()
 		cancelStopEventPromise()
-		panic("something went wrong")
+		panic("protocol error")
 	}
 
 	select {
@@ -467,7 +499,7 @@ func yieldNext(
 		panic("generator destroy")
 	case nextEvent := <-nextEventPromise:
 		cancelStopEventPromise()
-		logger.Debug("continue", "nextEvent.ID", nextEvent.ID())
+		logger.Debug("generator next", "nextEvent.ID", nextEvent.ID())
 		return nextEvent
 	}
 }
@@ -476,8 +508,8 @@ func Yield[I any](
 	source Event,
 	inPayload I,
 ) NextEvent {
-	peer := source.getPeer()
-	logger := peer.logger.With(
+	router := source.getPeer()
+	logger := router.logger.With(
 		"name", "Yield",
 		"sourceEvent.Kind", source.Kind(),
 	)
@@ -488,14 +520,14 @@ func Yield[I any](
 	if ok {
 		generator := NewGeneratorPayload{wampShared.NewID()}
 		yieldEvent := newYieldEvent(callEvent, generator)
-		source = yieldNext(peer, generator.ID, lifetime, yieldEvent, logger)
+		source = yieldNext(router, generator.ID, lifetime, yieldEvent, logger)
 	}
 
 	nextEvent, ok := source.(NextEvent)
 	if ok {
 		nextFeatures := nextEvent.Features()
 		yieldEvent := newYieldEvent(nextEvent, inPayload)
-		return yieldNext(peer, nextFeatures.GeneratorID, lifetime, yieldEvent, logger)
+		return yieldNext(router, nextFeatures.GeneratorID, lifetime, yieldEvent, logger)
 	}
 
 	logger.Error("invalid source event (destroying generator)")

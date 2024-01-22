@@ -9,12 +9,12 @@ var (
 	ErrorApplication = errors.New("ApplicationError")
 )
 
-type PublishProcedure[I any] func(I, PublishEvent)
+type ProcedureToPublish[I any] func(I, PublishEvent)
 
 type publishEventEndpoint func(PublishEvent)
 
 func NewPublishEventEndpoint[I any](
-	procedure PublishProcedure[I],
+	procedure ProcedureToPublish[I],
 	__logger *slog.Logger,
 ) publishEventEndpoint {
 	logger := __logger.With("name", "PublishEventEndpoint")
@@ -39,12 +39,12 @@ func NewPublishEventEndpoint[I any](
 	}
 }
 
-type CallProcedure[I, O any] func(I, CallEvent) (O, error)
+type ProcedureToCall[I, O any] func(I, CallEvent) (O, error)
 
 type callEventEndpoint func(CallEvent) ReplyEvent
 
 func NewCallEventEndpoint[I, O any](
-	procedure CallProcedure[I, O],
+	procedure ProcedureToCall[I, O],
 	__logger *slog.Logger,
 ) callEventEndpoint {
 	logger := __logger.With("name", "CallEventEndpoint")

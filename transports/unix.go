@@ -8,22 +8,32 @@ import (
 	"time"
 
 	wamp "github.com/wamp3hub/wamp3go"
+	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 type unixTransport struct {
-	Serializer wamp.Serializer
-	Connection net.Conn
-	buffer     *bufio.Reader
+	Path        string
+	DialTimeout time.Duration
+	Serializer  wamp.Serializer
+	buffer      *bufio.Reader
+	Connection  net.Conn
 }
 
 func UnixTransport(
+	path string,
+	dialTimeout time.Duration,
 	serializer wamp.Serializer,
 	connection net.Conn,
 ) *unixTransport {
+	if dialTimeout == 0 {
+		dialTimeout = time.Minute
+	}
 	return &unixTransport{
+		path,
+		dialTimeout,
 		serializer,
-		connection,
 		bufio.NewReader(connection),
+		connection,
 	}
 }
 
@@ -42,6 +52,11 @@ func (transport *unixTransport) initialize() (string, string, error) {
 		}
 	}
 	return "", "", e
+}
+
+func (transport *unixTransport) Connect() (e error) {
+	transport.Connection, e = net.DialTimeout("unix", transport.Path, transport.DialTimeout)
+	return e
 }
 
 func (transport *unixTransport) Close() error {
@@ -85,22 +100,6 @@ type UnixClientMessage struct {
 	SerializerCode string `json:"serializerCode"`
 }
 
-func UnixConnect(
-	path string,
-	timeout time.Duration,
-	serializer wamp.Serializer,
-) (*unixTransport, error) {
-	if timeout == 0 {
-		timeout = time.Minute
-	}
-	connection, e := net.DialTimeout("unix", path, timeout)
-	if e == nil {
-		transport := UnixTransport(serializer, connection)
-		return transport, nil
-	}
-	return nil, e
-}
-
 type UnixJoinOptions struct {
 	Path           string
 	DialTimeout    time.Duration
@@ -112,21 +111,23 @@ func UnixJoin(
 	joinOptions *UnixJoinOptions,
 ) (*wamp.Session, error) {
 	logger := slog.New(joinOptions.LoggingHandler)
-	joinOptionsLogData := slog.Group("JoinOptions", "Path", joinOptions.Path, "Serializer", joinOptions.Serializer.Code())
+	joinOptionsLogData := slog.Group(
+		"JoinOptions",
+		"Path", joinOptions.Path,
+		"Serializer", joinOptions.Serializer.Code(),
+	)
 	logger.Debug("trying to join", joinOptionsLogData)
 
-	transport, e := UnixConnect(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer)
-	if e != nil {
-		logger.Error("failed to connect unix server", "error", e, joinOptionsLogData)
-		return nil, e
-	}
-
-	routerID, peerID, e := transport.initialize()
+	transport := UnixTransport(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer, nil)
+	e := transport.Connect()
 	if e == nil {
-		peer := wamp.SpawnPeer(peerID, transport, logger)
-		session := wamp.NewSession(peer, logger)
-		logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, joinOptionsLogData)
-		return session, nil
+		routerID, peerID, e := transport.initialize()
+		if e == nil {
+			peer := wamp.SpawnPeer(peerID, transport, wampShared.DontRetryStrategy, logger)
+			session := wamp.NewSession(peer, logger)
+			logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, joinOptionsLogData)
+			return session, nil
+		}
 	}
 	logger.Error("failed to initialize unix transport", "error", e, joinOptionsLogData)
 	return nil, e

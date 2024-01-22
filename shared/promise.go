@@ -32,16 +32,16 @@ func NewTimelessPromise[T any]() (Promise[T], CompletePromise[T], CancelPromise)
 }
 
 func NewPromise[T any](timeout time.Duration) (Promise[T], CompletePromise[T], CancelPromise) {
-	promise, complete, cancel := NewTimelessPromise[T]()
+	promise, completePromise, cancelPromise := NewTimelessPromise[T]()
 
 	if timeout > 0 {
-		await := func() {
-			<-time.After(timeout)
-			cancel()
+		awaitExpiration := func() {
+			time.Sleep(timeout)
+			cancelPromise()
 		}
 
-		go await()
+		go awaitExpiration()
 	}
 
-	return promise, complete, cancel
+	return promise, completePromise, cancelPromise
 }
