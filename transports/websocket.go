@@ -43,32 +43,27 @@ func (transport *WSTransport) Read() (wamp.Event, error) {
 	return nil, ErrorBadConnection
 }
 
-func wsConnect(
-	address string,
-	serializer wamp.Serializer,
-) (wamp.Transport, error) {
-	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
-	if e == nil {
-		instance := WSTransport{address, serializer, connection}
-		return &instance, nil
-	}
-	return nil, e
-}
-
 func WebsocketConnect(
 	address string,
 	serializer wamp.Serializer,
 	strategy wampShared.RetryStrategy,
 	logger *slog.Logger,
 ) (wamp.Transport, error) {
-	transport, e := wsConnect(address, serializer)
+	connect := func() (wamp.Transport, error) {
+		connection, _, e := websocket.DefaultDialer.Dial(address, nil)
+		if e == nil {
+			instance := WSTransport{address, serializer, connection}
+			return &instance, nil
+		}
+		return nil, e
+	}
+
+	transport, e := connect()
 	if e == nil {
 		instance := NewReconnectableTransport(
 			transport,
 			strategy,
-			func() (wamp.Transport, error) {
-				return wsConnect(address, serializer)
-			},
+			connect,
 			logger,
 		)
 		return instance, nil
