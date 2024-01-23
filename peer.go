@@ -15,10 +15,10 @@ const (
 )
 
 var (
-	ErrorSerialization  = errors.New("serialization error")
-	ErrorBadConnection  = errors.New("bad connection")
-	ErrorConnectionLost = errors.New("connection lost")
-	ErrorTimedOut       = errors.New("timed out")
+	ErrorSerialization      = errors.New("serialization error")
+	ErrorConnectionRestored = errors.New("connection was restored")
+	ErrorConnectionClosed   = errors.New("connection is closed")
+	ErrorTimedOut           = errors.New("timed out")
 )
 
 type Serializer interface {
@@ -28,7 +28,6 @@ type Serializer interface {
 }
 
 type Transport interface {
-	Connect() error
 	Close() error
 	Read() (Event, error)
 	Write(Event) error
@@ -36,34 +35,25 @@ type Transport interface {
 
 type Peer struct {
 	ID                    string
-	Alive                 chan struct{}
-	writeMutex            *sync.Mutex
-	readMutex             *sync.Mutex
 	transport             Transport
-	reconnectionStrategy  wampShared.RetryStrategy
-	ReJoinEvents          *wampShared.ObservableObject[struct{}]
+	RejoinEvents          *wampShared.Observable[struct{}]
 	pendingAcceptEvents   *wampShared.PendingMap[AcceptEvent]
 	PendingReplyEvents    *wampShared.PendingMap[ReplyEvent]
 	PendingCancelEvents   *wampShared.PendingMap[CancelEvent]
 	PendingNextEvents     *wampShared.PendingMap[NextEvent]
-	IncomingPublishEvents *wampShared.ObservableObject[PublishEvent]
-	IncomingCallEvents    *wampShared.ObservableObject[CallEvent]
+	IncomingPublishEvents *wampShared.Observable[PublishEvent]
+	IncomingCallEvents    *wampShared.Observable[CallEvent]
 	logger                *slog.Logger
 }
 
 func newPeer(
 	ID string,
 	transport Transport,
-	reconnectionStrategy wampShared.RetryStrategy,
 	logger *slog.Logger,
 ) *Peer {
 	return &Peer{
 		ID,
-		make(chan struct{}),
-		new(sync.Mutex),
-		new(sync.Mutex),
 		transport,
-		reconnectionStrategy,
 		wampShared.NewObservable[struct{}](),
 		wampShared.NewPendingMap[AcceptEvent](),
 		wampShared.NewPendingMap[ReplyEvent](),
@@ -80,70 +70,6 @@ func newPeer(
 	}
 }
 
-// Pause io operations
-func (peer *Peer) Pause() {
-	peer.writeMutex.Lock()
-	peer.readMutex.Lock()
-	peer.logger.Debug("io pause")
-}
-
-// Resume io operations
-func (peer *Peer) Resume() {
-	peer.readMutex.Unlock()
-	peer.writeMutex.Unlock()
-	peer.logger.Debug("io resume")
-}
-
-// reconnects until the connection is established
-func (peer *Peer) reconnect() error {
-	if peer.reconnectionStrategy.AttemptNumber() == 0 {
-		peer.Pause()
-	}
-
-	if peer.reconnectionStrategy.Done() {
-		peer.logger.Error("reconnection attempts exceeded")
-		return ErrorConnectionLost
-	}
-
-	sleepDuration := peer.reconnectionStrategy.Next()
-	peer.logger.Debug("sleeping", "duration", sleepDuration)
-	time.Sleep(sleepDuration)
-
-	peer.logger.Warn("reconnecting...")
-	e := peer.transport.Connect()
-	if e == nil {
-		peer.logger.Info("successfully reconnected")
-		peer.reconnectionStrategy.Reset()
-		peer.Resume()
-		peer.ReJoinEvents.Next(struct{}{})
-		return nil
-	}
-
-	peer.logger.Error("during reconnect", "error", e)
-	return peer.reconnect()
-}
-
-// Closes the connection
-func (peer *Peer) Close() error {
-	peer.logger.Debug("trying to close...")
-	e := peer.transport.Close()
-	if e == nil {
-		peer.logger.Debug("successfully closed")
-	} else {
-		peer.logger.Error("during close", "error", e)
-	}
-	return e
-}
-
-// prevent concurrent writes
-// and locks writing if connection is lost
-func (peer *Peer) safeSend(event Event) error {
-	peer.writeMutex.Lock()
-	e := peer.transport.Write(event)
-	peer.writeMutex.Unlock()
-	return e
-}
-
 // Sends an acknowledgement to the peer.
 func (peer *Peer) acknowledge(source Event) bool {
 	logData := slog.Group(
@@ -153,7 +79,7 @@ func (peer *Peer) acknowledge(source Event) bool {
 	)
 	acceptEvent := newAcceptEvent(source)
 	for i := DEFAULT_RESEND_COUNT; i > -1; i-- {
-		e := peer.safeSend(acceptEvent)
+		e := peer.transport.Write(acceptEvent)
 		if e == nil {
 			peer.logger.Debug("acknowledgement successfully sent", logData)
 			return true
@@ -181,7 +107,7 @@ func (peer *Peer) Send(event Event, retryCount int) bool {
 	// creates a timeless promise, because the timeout is manually
 	acceptEventPromise, cancelAcceptEventPromise := peer.pendingAcceptEvents.New(event.ID(), 0)
 
-	e := peer.safeSend(event)
+	e := peer.transport.Write(event)
 	if e == nil {
 		peer.logger.Debug("event successfully sent", logData)
 		select {
@@ -198,29 +124,21 @@ func (peer *Peer) Send(event Event, retryCount int) bool {
 	return peer.Send(event, retryCount-1)
 }
 
-// locks reading if the connection is lost
-func (peer *Peer) safeRead() (Event, error) {
-	peer.readMutex.Lock()
-	event, e := peer.transport.Read()
-	peer.readMutex.Unlock()
-	return event, e
-}
-
 func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 	peer.logger.Debug("reading begin")
 	wg.Done()
 
 	for {
-		event, e := peer.safeRead()
+		event, e := peer.transport.Read()
 		if e != nil {
-			if errors.Is(e, ErrorBadConnection) {
-				peer.logger.Warn("bad connection")
-				e = peer.reconnect()
-			}
-
-			if errors.Is(e, ErrorConnectionLost) {
+			if errors.Is(e, ErrorConnectionClosed) {
 				peer.logger.Warn("connection lost")
 				break
+			}
+
+			if errors.Is(e, ErrorConnectionRestored) {
+				peer.logger.Warn("bad connection")
+				peer.RejoinEvents.Next(struct{}{})
 			}
 
 			peer.logger.Warn("during read", "error", e)
@@ -235,7 +153,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 		)
 		peer.logger.Debug("new", logData)
 
-		event.setPeer(peer)
+		event.setRouter(peer)
 
 		switch event := event.(type) {
 		case AcceptEvent:
@@ -272,18 +190,29 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 
 	peer.IncomingPublishEvents.Complete()
 	peer.IncomingCallEvents.Complete()
-	close(peer.Alive)
+	peer.RejoinEvents.Complete()
 
 	peer.logger.Debug("reading end")
+}
+
+// Closes the connection
+func (peer *Peer) Close() error {
+	peer.logger.Debug("trying to close...")
+	e := peer.transport.Close()
+	if e == nil {
+		peer.logger.Debug("successfully closed")
+	} else {
+		peer.logger.Error("during close", "error", e)
+	}
+	return e
 }
 
 func SpawnPeer(
 	ID string,
 	transport Transport,
-	reconnectionStrategy wampShared.RetryStrategy,
 	logger *slog.Logger,
 ) *Peer {
-	peer := newPeer(ID, transport, reconnectionStrategy, logger)
+	peer := newPeer(ID, transport, logger)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)

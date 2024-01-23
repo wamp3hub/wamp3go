@@ -13,13 +13,13 @@ type Observer[T any] struct {
 
 // TODO unconsume
 
-type ObservableObject[T any] struct {
+type Observable[T any] struct {
 	done      bool
 	observers []*Observer[T]
 	mutex     sync.RWMutex
 }
 
-func (object *ObservableObject[T]) Observe(next nextFunction[T], complete completeFunction) *Observer[T] {
+func (object *Observable[T]) Observe(next nextFunction[T], complete completeFunction) *Observer[T] {
 	object.mutex.Lock()
 	observer := Observer[T]{next, complete}
 	object.observers = append(object.observers, &observer)
@@ -27,14 +27,14 @@ func (object *ObservableObject[T]) Observe(next nextFunction[T], complete comple
 	return &observer
 }
 
-func (object *ObservableObject[T]) Next(v T) {
+func (object *Observable[T]) Next(v T) {
 	// TODO rate limiting
 	for _, instance := range object.observers {
 		go instance.next(v)
 	}
 }
 
-func (object *ObservableObject[T]) Complete() {
+func (object *Observable[T]) Complete() {
 	object.mutex.Lock()
 	object.done = true
 	for _, instance := range object.observers {
@@ -43,6 +43,6 @@ func (object *ObservableObject[T]) Complete() {
 	clear(object.observers)
 }
 
-func NewObservable[T any]() *ObservableObject[T] {
-	return new(ObservableObject[T])
+func NewObservable[T any]() *Observable[T] {
+	return new(Observable[T])
 }

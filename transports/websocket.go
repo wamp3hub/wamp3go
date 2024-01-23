@@ -3,6 +3,7 @@ package wampTransports
 import (
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/gorilla/websocket"
 
@@ -13,14 +14,9 @@ import (
 )
 
 type WSTransport struct {
-	Address              string
-	Serializer           wamp.Serializer
-	Connection           *websocket.Conn
-}
-
-func (transport *WSTransport) Connect() (e error) {
-	transport.Connection, _, e = websocket.DefaultDialer.Dial(transport.Address, nil)
-	return e
+	Address    string
+	Serializer wamp.Serializer
+	Connection *websocket.Conn
 }
 
 func (transport *WSTransport) Close() error {
@@ -41,7 +37,43 @@ func (transport *WSTransport) Read() (wamp.Event, error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, wamp.ErrorConnectionLost
+	if websocket.IsCloseError(e, websocket.CloseNormalClosure) {
+		return nil, wamp.ErrorConnectionClosed
+	}
+	return nil, ErrorBadConnection
+}
+
+func wsConnect(
+	address string,
+	serializer wamp.Serializer,
+) (wamp.Transport, error) {
+	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
+	if e == nil {
+		instance := WSTransport{address, serializer, connection}
+		return &instance, nil
+	}
+	return nil, e
+}
+
+func WebsocketConnect(
+	address string,
+	serializer wamp.Serializer,
+	strategy wampShared.RetryStrategy,
+	logger *slog.Logger,
+) (wamp.Transport, error) {
+	transport, e := wsConnect(address, serializer)
+	if e == nil {
+		instance := NewReconnectableTransport(
+			transport,
+			strategy,
+			func() (wamp.Transport, error) {
+				return wsConnect(address, serializer)
+			},
+			logger,
+		)
+		return instance, nil
+	}
+	return nil, e
 }
 
 type WebsocketJoinOptions struct {
@@ -62,13 +94,18 @@ func WebsocketJoin(
 	if joinOptions.ReconnectionStrategy == nil {
 		joinOptions.ReconnectionStrategy = wampShared.DefaultRetryStrategy
 	}
+	if joinOptions.LoggingHandler == nil {
+		joinOptions.LoggingHandler = slog.NewTextHandler(
+			os.Stdout,
+			&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
+		)
+	}
 
 	logger := slog.New(joinOptions.LoggingHandler)
 	joinOptionsLogData := slog.Group(
 		"joinOptions",
 		"address", joinOptions.Address,
 		"secure", joinOptions.Secure,
-		"serializer", joinOptions.Serializer.Code(),
 	)
 	logger.Debug("trying to join", joinOptionsLogData)
 
@@ -82,7 +119,12 @@ func WebsocketJoin(
 		return nil, e
 	}
 
-	interviewLogData := slog.Group("interview", "peerID", payload.YourID, "routerID", payload.RouterID, "ticket", payload.Ticket)
+	interviewLogData := slog.Group(
+		"interview",
+		"peerID", payload.YourID,
+		"routerID", payload.RouterID,
+		"ticket", payload.Ticket,
+	)
 	logger.Debug("interview has been completed", joinOptionsLogData, interviewLogData)
 
 	protocol := "ws"
@@ -93,15 +135,16 @@ func WebsocketJoin(
 		"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
 		protocol, joinOptions.Address, payload.Ticket, joinOptions.Serializer.Code(),
 	)
-	transport := WSTransport{Address: wsAddress, Serializer: joinOptions.Serializer}
-	e = transport.Connect()
-	if e == nil {
-		peer := wamp.SpawnPeer(payload.YourID, &transport, joinOptions.ReconnectionStrategy, logger)
-		session := wamp.NewSession(peer, logger)
-		logger.Debug("successful joined", joinOptionsLogData, interviewLogData)
-		return session, nil
+	transport, e := WebsocketConnect(
+		wsAddress, joinOptions.Serializer, joinOptions.ReconnectionStrategy, logger,
+	)
+	if e != nil {
+		logger.Error("during connect", "error", e, joinOptionsLogData, interviewLogData)
+		return nil, e
 	}
 
-	logger.Error("during connect", "error", e, joinOptionsLogData, interviewLogData)
-	return nil, e
+	peer := wamp.SpawnPeer(payload.YourID, transport, logger)
+	session := wamp.NewSession(peer, logger)
+	logger.Debug("successfully joined", joinOptionsLogData, interviewLogData)
+	return session, nil
 }

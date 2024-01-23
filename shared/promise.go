@@ -7,8 +7,10 @@ import (
 
 type Promise[T any] <-chan T
 
+// TODO return error
 type CompletePromise[T any] func(T)
 
+// TODO return error
 type CancelPromise func()
 
 func NewTimelessPromise[T any]() (Promise[T], CompletePromise[T], CancelPromise) {

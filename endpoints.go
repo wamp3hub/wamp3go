@@ -6,7 +6,8 @@ import (
 )
 
 var (
-	ErrorApplication = errors.New("ApplicationError")
+	ErrorApplication = errors.New("application error")
+	ErrorInvalidPayload = errors.New("invalid payload")
 )
 
 type ProcedureToPublish[I any] func(I, PublishEvent)
@@ -52,7 +53,7 @@ func NewCallEventEndpoint[I, O any](
 		payload, e := ReadPayload[I](callEvent)
 		if e != nil {
 			logger.Warn("during serialize payload", "error", e)
-			replyEvent = NewErrorEvent(callEvent, InvalidPayload)
+			replyEvent = NewErrorEvent(callEvent, ErrorInvalidPayload)
 			return replyEvent
 		}
 

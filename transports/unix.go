@@ -8,55 +8,23 @@ import (
 	"time"
 
 	wamp "github.com/wamp3hub/wamp3go"
-	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
 type unixTransport struct {
-	Path        string
-	DialTimeout time.Duration
-	Serializer  wamp.Serializer
-	buffer      *bufio.Reader
-	Connection  net.Conn
+	Serializer wamp.Serializer
+	Connection net.Conn
+	buffer     *bufio.Reader
 }
 
 func UnixTransport(
-	path string,
-	dialTimeout time.Duration,
 	serializer wamp.Serializer,
 	connection net.Conn,
 ) *unixTransport {
-	if dialTimeout == 0 {
-		dialTimeout = time.Minute
-	}
 	return &unixTransport{
-		path,
-		dialTimeout,
 		serializer,
-		bufio.NewReader(connection),
 		connection,
+		bufio.NewReader(connection),
 	}
-}
-
-func (transport *unixTransport) initialize() (string, string, error) {
-	serverMessage := new(UnixServerMessage)
-	rawServerMessage, e := transport.ReadRaw()
-	if e == nil {
-		e = json.Unmarshal(rawServerMessage, serverMessage)
-		if e == nil {
-			clientMessage := UnixClientMessage{transport.Serializer.Code()}
-			rawClientMessage, _ := json.Marshal(clientMessage)
-			e = transport.WriteRaw(rawClientMessage)
-			if e == nil {
-				return serverMessage.RouterID, serverMessage.YourID, nil
-			}
-		}
-	}
-	return "", "", e
-}
-
-func (transport *unixTransport) Connect() (e error) {
-	transport.Connection, e = net.DialTimeout("unix", transport.Path, transport.DialTimeout)
-	return e
 }
 
 func (transport *unixTransport) Close() error {
@@ -88,7 +56,24 @@ func (transport *unixTransport) Read() (event wamp.Event, e error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, wamp.ErrorConnectionLost
+	return nil, ErrorBadConnection
+}
+
+func (transport *unixTransport) initialize() (string, string, error) {
+	serverMessage := new(UnixServerMessage)
+	rawServerMessage, e := transport.ReadRaw()
+	if e == nil {
+		e = json.Unmarshal(rawServerMessage, serverMessage)
+		if e == nil {
+			clientMessage := UnixClientMessage{transport.Serializer.Code()}
+			rawClientMessage, _ := json.Marshal(clientMessage)
+			e = transport.WriteRaw(rawClientMessage)
+			if e == nil {
+				return serverMessage.RouterID, serverMessage.YourID, nil
+			}
+		}
+	}
+	return "", "", e
 }
 
 type UnixServerMessage struct {
@@ -98,6 +83,22 @@ type UnixServerMessage struct {
 
 type UnixClientMessage struct {
 	SerializerCode string `json:"serializerCode"`
+}
+
+func UnixConnect(
+	path string,
+	timeout time.Duration,
+	serializer wamp.Serializer,
+) (*unixTransport, error) {
+	if timeout == 0 {
+		timeout = time.Minute
+	}
+	connection, e := net.DialTimeout("unix", path, timeout)
+	if e == nil {
+		transport := UnixTransport(serializer, connection)
+		return transport, nil
+	}
+	return nil, e
 }
 
 type UnixJoinOptions struct {
@@ -111,24 +112,26 @@ func UnixJoin(
 	joinOptions *UnixJoinOptions,
 ) (*wamp.Session, error) {
 	logger := slog.New(joinOptions.LoggingHandler)
-	joinOptionsLogData := slog.Group(
+	logData := slog.Group(
 		"JoinOptions",
 		"Path", joinOptions.Path,
 		"Serializer", joinOptions.Serializer.Code(),
 	)
-	logger.Debug("trying to join", joinOptionsLogData)
+	logger.Debug("trying to join", logData)
 
-	transport := UnixTransport(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer, nil)
-	e := transport.Connect()
-	if e == nil {
-		routerID, peerID, e := transport.initialize()
-		if e == nil {
-			peer := wamp.SpawnPeer(peerID, transport, wampShared.DontRetryStrategy, logger)
-			session := wamp.NewSession(peer, logger)
-			logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, joinOptionsLogData)
-			return session, nil
-		}
+	transport, e := UnixConnect(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer)
+	if e != nil {
+		logger.Error("failed to connect unix server", "error", e, logData)
+		return nil, e
 	}
-	logger.Error("failed to initialize unix transport", "error", e, joinOptionsLogData)
+
+	routerID, peerID, e := transport.initialize()
+	if e == nil {
+		peer := wamp.SpawnPeer(peerID, transport, logger)
+		session := wamp.NewSession(peer, logger)
+		logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, logData)
+		return session, nil
+	}
+	logger.Error("failed to initialize unix transport", "error", e, logData)
 	return nil, e
 }

@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
-	"os"
 	"sync"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -23,10 +21,6 @@ func main() {
 		&wampTransports.WebsocketJoinOptions{
 			Address:     "0.0.0.0:8800",
 			Credentials: &LoginPayload{"test", "test"},
-			LoggingHandler: slog.NewTextHandler(
-				os.Stdout,
-				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
-			),
 		},
 	)
 	if e == nil {

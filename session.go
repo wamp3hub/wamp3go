@@ -10,7 +10,24 @@ import (
 
 const DEFAULT_GENERATOR_LIFETIME = 3600
 
-var ErrorDispatch = errors.New("dispatch error")
+var (
+	ErrorCancelled     = errors.New("cancelled")
+	ErrorDispatch      = errors.New("dispatch error")
+	ErrorGeneratorExit = errors.New("generator exit")
+	ProcedureNotFound  = errors.New("procedure not found")
+)
+
+type generatorExitException struct {
+	Source Event
+}
+
+func (generatorExitException) Error() string {
+	return "GeneratorExit"
+}
+
+func GeneratorExit(source Event) *generatorExitException {
+	return &generatorExitException{source}
+}
 
 type Session struct {
 	Subscriptions map[string]publishEventEndpoint
@@ -101,7 +118,7 @@ func NewSession(
 		},
 	)
 
-	session.router.ReJoinEvents.Observe(
+	session.router.RejoinEvents.Observe(
 		func(__ struct{}) {
 			for name, restore := range session.restorables {
 				session.logger.Debug("restoring", "name", name)
@@ -254,10 +271,11 @@ func Subscribe[I any](
 		session.Subscriptions[subscription.ID] = endpoint
 		session.logger.Debug("new subscription", logData)
 
-		session.restorables[subscription.ID] = func() {
+		onRejoin := func() {
 			delete(session.Subscriptions, subscription.ID)
 			Subscribe[I](session, uri, options, procedure)
 		}
+		session.restorables[subscription.ID] = onRejoin
 
 		return subscription, nil
 	}
@@ -287,10 +305,11 @@ func Register[I, O any](
 		session.Registrations[registration.ID] = endpoint
 		session.logger.Debug("new registration", logData)
 
-		session.restorables[registration.ID] = func() {
+		onRejoin := func() {
 			delete(session.Registrations, registration.ID)
 			Register[I, O](session, uri, options, procedure)
 		}
+		session.restorables[registration.ID] = onRejoin
 
 		return registration, nil
 	}
@@ -401,6 +420,11 @@ func NewRemoteGenerator[O, I any](
 func (generator *remoteGenerator[T]) Next(
 	timeout uint64,
 ) (response ReplyEvent, outPayload T, e error) {
+	if generator.done {
+		generator.logger.Error("generator already closed")
+		return nil, outPayload, ErrorGeneratorExit
+	}
+
 	logData := slog.Group(
 		"nextEvent",
 		"yieldID", generator.lastYieldID,
@@ -408,15 +432,13 @@ func (generator *remoteGenerator[T]) Next(
 	)
 	generator.logger.Debug("trying to get next", logData)
 
-	if generator.done {
-		generator.logger.Error("generator already done", logData)
-		panic("generator exit")
-	}
-
 	nextFeatures := NextFeatures{generator.ID, generator.lastYieldID, timeout}
 	nextEvent := newNextEvent(&nextFeatures)
 	responseTimeout := time.Duration(2*timeout) * time.Second
-	responsePromise, cancelResponsePromise := generator.peer.PendingReplyEvents.New(nextEvent.ID(), responseTimeout)
+	responsePromise, cancelResponsePromise := generator.peer.PendingReplyEvents.New(
+		nextEvent.ID(),
+		responseTimeout,
+	)
 	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
 	ok := generator.peer.Send(nextEvent, DEFAULT_RESEND_COUNT)
 	if !ok {
@@ -433,19 +455,18 @@ func (generator *remoteGenerator[T]) Next(
 	} else {
 		generator.logger.Debug("destroying generator", "error", e, logData)
 		generator.done = true
-		// TODO handle
 	}
 
 	return response, outPayload, e
 }
 
 func (generator *remoteGenerator[T]) Stop() error {
-	generator.logger.Debug("trying to stop generator")
-
 	if generator.done {
-		generator.logger.Error("generator already done")
-		panic("generator exit")
+		generator.logger.Error("generator already closed")
+		return ErrorGeneratorExit
 	}
+
+	generator.logger.Debug("trying to stop generator")
 
 	stopEvent := NewStopEvent(generator.ID)
 	ok := generator.peer.Send(stopEvent, DEFAULT_RESEND_COUNT)
@@ -508,7 +529,7 @@ func Yield[I any](
 	source Event,
 	inPayload I,
 ) NextEvent {
-	router := source.getPeer()
+	router := source.getRouter()
 	logger := router.logger.With(
 		"name", "Yield",
 		"sourceEvent.Kind", source.Kind(),
@@ -532,16 +553,4 @@ func Yield[I any](
 
 	logger.Error("invalid source event (destroying generator)")
 	panic("invalid source event")
-}
-
-type generatorExitException struct {
-	Source Event
-}
-
-func (generatorExitException) Error() string {
-	return "GeneratorExit"
-}
-
-func GeneratorExit(source Event) *generatorExitException {
-	return &generatorExitException{source}
 }

@@ -3,8 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampTransports "github.com/wamp3hub/wamp3go/transports"
@@ -20,10 +18,6 @@ func main() {
 		&wampTransports.WebsocketJoinOptions{
 			Address:     "0.0.0.0:8800",
 			Credentials: &LoginPayload{"test", "test"},
-			LoggingHandler: slog.NewTextHandler(
-				os.Stdout,
-				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
-			),
 		},
 	)
 	if e == nil {
