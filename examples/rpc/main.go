@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampTransports "github.com/wamp3hub/wamp3go/transports"
@@ -55,4 +56,6 @@ func main() {
 	} else {
 		fmt.Printf("call(example.greeting) %s\n", e)
 	}
+
+	time.Sleep(time.Minute)
 }

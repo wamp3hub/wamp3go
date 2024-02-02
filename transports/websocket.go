@@ -37,7 +37,7 @@ func (transport *WSTransport) Read() (wamp.Event, error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	if websocket.IsCloseError(e, websocket.CloseNormalClosure) {
+	if websocket.IsCloseError(e, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure) {
 		return nil, wamp.ErrorConnectionClosed
 	}
 	return nil, ErrorBadConnection
@@ -113,7 +113,6 @@ func WebsocketJoin(
 		"interview",
 		"peerID", payload.YourID,
 		"routerID", payload.RouterID,
-		"ticket", payload.Ticket,
 	)
 	logger.Debug("interview successfully", joinOptionsLogData, interviewLogData)
 

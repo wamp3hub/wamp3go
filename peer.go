@@ -125,8 +125,24 @@ func (peer *Peer) Send(event Event, retryCount int) bool {
 }
 
 func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
-	peer.logger.Debug("reading incoming events begin")
 	wg.Done()
+
+	finally := func() {
+		peer.IncomingPublishEvents.Complete()
+		peer.IncomingCallEvents.Complete()
+		peer.RejoinEvents.Complete()
+
+		e := recover()
+		if e == nil {
+			peer.logger.Debug("reading of incoming events ended normally")
+		} else {
+			peer.logger.Warn("during read incoming events", "error", e)
+		}
+	}
+
+	defer finally()
+
+	peer.logger.Debug("reading incoming events begin")
 
 	for {
 		event, e := peer.transport.Read()
@@ -190,12 +206,6 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 			peer.logger.Error("during read event", "error", e, logData)
 		}
 	}
-
-	peer.IncomingPublishEvents.Complete()
-	peer.IncomingCallEvents.Complete()
-	peer.RejoinEvents.Complete()
-
-	peer.logger.Debug("reading incoming events end")
 }
 
 // Closes the connection

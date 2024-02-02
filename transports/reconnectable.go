@@ -39,8 +39,10 @@ func MakeReconnectable(
 			"name", "reconnectable",
 		),
 	}
-
 	e := instance.reconnect()
+	if errors.Is(e, wamp.ErrorConnectionRestored) {
+		e = nil
+	}
 	return &instance, e
 }
 
@@ -82,7 +84,7 @@ func (reconnectable *reconnectableTransport) reconnect() error {
 		time.Sleep(sleepDuration)
 	}
 
-	reconnectable.logger.Warn("connecting...")
+	reconnectable.logger.Info("connecting...")
 	newTransport, e := reconnectable.connect()
 	if e != nil {
 		reconnectable.logger.Error("during connect", "error", e)
