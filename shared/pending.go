@@ -50,7 +50,7 @@ func (pendingMap PendingMap[T]) New(
 		panic("pending already exists")
 	}
 
-	pending, completePromise, cancelPromise := NewPromise[T](timeout)
+	promise, completePromise, cancelPromise := NewPromise[T](timeout)
 
 	pendingMap.safeSet(key, completePromise)
 
@@ -59,7 +59,7 @@ func (pendingMap PendingMap[T]) New(
 		cancelPromise()
 	}
 
-	return pending, cancelPending
+	return promise, cancelPending
 }
 
 func (pendingMap PendingMap[T]) Complete(key string, value T) error {

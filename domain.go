@@ -1,16 +1,9 @@
 package wamp
 
 import (
-	"errors"
 	"strings"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
-)
-
-var (
-	ErrorCancelled    = errors.New("Cancelled")
-	InvalidPayload    = errors.New("InvalidPayload")
-	ProcedureNotFound = errors.New("ProcedureNotFound")
 )
 
 type MessageKind int8
@@ -46,11 +39,11 @@ func (event *eventProto[F]) Features() F {
 	return event.features
 }
 
-func (event *eventProto[F]) setPeer(instance *Peer) {
+func (event *eventProto[F]) setRouter(instance *Peer) {
 	event.peer = instance
 }
 
-func (event *eventProto[F]) getPeer() *Peer {
+func (event *eventProto[F]) getRouter() *Peer {
 	return event.peer
 }
 
@@ -77,8 +70,8 @@ func (field *routeEventField[T]) Route() T {
 type Event interface {
 	ID() string
 	Kind() MessageKind
-	setPeer(*Peer)
-	getPeer() *Peer
+	setRouter(*Peer)
+	getRouter() *Peer
 }
 
 type AcceptFeatures struct {

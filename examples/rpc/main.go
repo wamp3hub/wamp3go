@@ -3,11 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 
 	wamp "github.com/wamp3hub/wamp3go"
-	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
 	wampTransports "github.com/wamp3hub/wamp3go/transports"
 )
 
@@ -18,15 +15,9 @@ func main() {
 	}
 
 	session, e := wampTransports.WebsocketJoin(
+		"0.0.0.0:8800",
 		&wampTransports.WebsocketJoinOptions{
-			Secure: false,
-			Address: "0.0.0.0:8888",
-			Serializer: wampSerializers.DefaultSerializer,
 			Credentials: &LoginPayload{"test", "test"},
-			LoggingHandler: slog.NewTextHandler(
-				os.Stdout,
-				&slog.HandlerOptions{AddSource: false, Level: slog.LevelInfo},
-			),
 		},
 	)
 	if e == nil {
@@ -43,7 +34,7 @@ func main() {
 			if len(name) == 0 {
 				return "", errors.New("InvalidName")
 			}
-			result := "Hello, "+name+"!"
+			result := "Hello, " + name + "!"
 			return result, nil
 		},
 	)

@@ -27,23 +27,6 @@ func UnixTransport(
 	}
 }
 
-func (transport *unixTransport) initialize() (string, string, error) {
-	serverMessage := new(UnixServerMessage)
-	rawServerMessage, e := transport.ReadRaw()
-	if e == nil {
-		e = json.Unmarshal(rawServerMessage, serverMessage)
-		if e == nil {
-			clientMessage := UnixClientMessage{transport.Serializer.Code()}
-			rawClientMessage, _ := json.Marshal(clientMessage)
-			e = transport.WriteRaw(rawClientMessage)
-			if e == nil {
-				return serverMessage.RouterID, serverMessage.YourID, nil
-			}
-		}
-	}
-	return "", "", e
-}
-
 func (transport *unixTransport) Close() error {
 	e := transport.Connection.Close()
 	return e
@@ -73,7 +56,24 @@ func (transport *unixTransport) Read() (event wamp.Event, e error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	return nil, wamp.ErrorConnectionLost
+	return nil, ErrorBadConnection
+}
+
+func (transport *unixTransport) initialize() (string, string, error) {
+	serverMessage := new(UnixServerMessage)
+	rawServerMessage, e := transport.ReadRaw()
+	if e == nil {
+		e = json.Unmarshal(rawServerMessage, serverMessage)
+		if e == nil {
+			clientMessage := UnixClientMessage{transport.Serializer.Code()}
+			rawClientMessage, _ := json.Marshal(clientMessage)
+			e = transport.WriteRaw(rawClientMessage)
+			if e == nil {
+				return serverMessage.RouterID, serverMessage.YourID, nil
+			}
+		}
+	}
+	return "", "", e
 }
 
 type UnixServerMessage struct {
@@ -112,12 +112,16 @@ func UnixJoin(
 	joinOptions *UnixJoinOptions,
 ) (*wamp.Session, error) {
 	logger := slog.New(joinOptions.LoggingHandler)
-	joinOptionsLogData := slog.Group("JoinOptions", "Path", joinOptions.Path, "Serializer", joinOptions.Serializer.Code())
-	logger.Debug("trying to join", joinOptionsLogData)
+	logData := slog.Group(
+		"JoinOptions",
+		"Path", joinOptions.Path,
+		"Serializer", joinOptions.Serializer.Code(),
+	)
+	logger.Debug("trying to join", logData)
 
 	transport, e := UnixConnect(joinOptions.Path, joinOptions.DialTimeout, joinOptions.Serializer)
 	if e != nil {
-		logger.Error("failed to connect unix server", "error", e, joinOptionsLogData)
+		logger.Error("failed to connect unix server", "error", e, logData)
 		return nil, e
 	}
 
@@ -125,9 +129,9 @@ func UnixJoin(
 	if e == nil {
 		peer := wamp.SpawnPeer(peerID, transport, logger)
 		session := wamp.NewSession(peer, logger)
-		logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, joinOptionsLogData)
+		logger.Debug("successfully joined", "routerID", routerID, "peerID", peerID, logData)
 		return session, nil
 	}
-	logger.Error("failed to initialize unix transport", "error", e, joinOptionsLogData)
+	logger.Error("failed to initialize unix transport", "error", e, logData)
 	return nil, e
 }
