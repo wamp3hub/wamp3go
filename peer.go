@@ -153,7 +153,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 			}
 
 			if errors.Is(e, ErrorConnectionRestored) {
-				peer.logger.Warn("bad connection")
+				peer.logger.Warn("connection restored")
 				peer.RejoinEvents.Next(struct{}{})
 			}
 
