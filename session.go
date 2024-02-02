@@ -8,13 +8,17 @@ import (
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
-const DEFAULT_GENERATOR_LIFETIME = 3600
+const (
+	DEFAULT_TIMEOUT            = 60
+	DEFAULT_GENERATOR_LIFETIME = 3600
+)
 
 var (
-	ErrorCancelled     = errors.New("cancelled")
-	ErrorDispatch      = errors.New("dispatch error")
-	ErrorGeneratorExit = errors.New("generator exit")
-	ProcedureNotFound  = errors.New("procedure not found")
+	ErrorDispatch          = errors.New("dispatch error")
+	ErrorTimedOut          = errors.New("timed out")
+	ErrorCancelled         = errors.New("cancelled")
+	ErrorGeneratorExit     = errors.New("generator exit")
+	ErrorProcedureNotFound = errors.New("procedure not found")
 )
 
 type generatorExitException struct {
@@ -32,7 +36,7 @@ func GeneratorExit(source Event) *generatorExitException {
 type Session struct {
 	Subscriptions map[string]publishEventEndpoint
 	Registrations map[string]callEventEndpoint
-	restorables   map[string]func()
+	restores      map[string]func()
 	router        *Peer
 	logger        *slog.Logger
 }
@@ -102,7 +106,7 @@ func NewSession(
 
 				replyEventLogData := slog.Group("replyEvent", "ID", replyEvent.ID())
 
-				ok := session.router.Send(replyEvent, DEFAULT_RESEND_COUNT)
+				ok := session.router.Send(replyEvent, default_resend_count)
 				if ok {
 					session.logger.Debug("call event processed successfully", callEventLogData, replyEventLogData)
 				} else {
@@ -120,13 +124,13 @@ func NewSession(
 
 	session.router.RejoinEvents.Observe(
 		func(__ struct{}) {
-			for name, restore := range session.restorables {
+			for name, restore := range session.restores {
 				session.logger.Debug("restoring", "name", name)
 				restore()
 			}
 		},
 		func() {
-			clear(session.restorables)
+			clear(session.restores)
 		},
 	)
 
@@ -147,7 +151,7 @@ func Publish[I any](
 	)
 
 	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(publishEvent, DEFAULT_RESEND_COUNT)
+	ok := session.router.Send(publishEvent, default_resend_count)
 	if ok {
 		session.logger.Debug("publication successfully sent", logData)
 		return nil
@@ -158,7 +162,7 @@ func Publish[I any](
 }
 
 type PendingResponse[T any] struct {
-	used          bool
+	done          bool
 	promise       wampShared.Promise[ReplyEvent]
 	cancelPromise wampShared.CancelPromise
 }
@@ -171,10 +175,10 @@ func newPendingResponse[T any](
 }
 
 func (pendingResponse *PendingResponse[T]) lock() {
-	if pendingResponse.used {
+	if pendingResponse.done {
 		panic("can not use again")
 	}
-	pendingResponse.used = true
+	pendingResponse.done = true
 }
 
 func (pendingResponse *PendingResponse[T]) Cancel() {
@@ -221,7 +225,7 @@ func Call[O, I any](
 	cancelCallEvent := func() {
 		session.logger.Debug("trying to cancel invocation", logData)
 		cancelEvent := newCancelEvent(callEvent)
-		ok := session.router.Send(cancelEvent, DEFAULT_RESEND_COUNT)
+		ok := session.router.Send(cancelEvent, default_resend_count)
 		if ok {
 			session.logger.Debug("invocation successfully cancelled", logData)
 		} else {
@@ -233,7 +237,7 @@ func Call[O, I any](
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 
 	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(callEvent, DEFAULT_RESEND_COUNT)
+	ok := session.router.Send(callEvent, default_resend_count)
 	if ok {
 		session.logger.Debug("call event successfully sent", logData)
 	} else {
@@ -275,7 +279,7 @@ func Subscribe[I any](
 			delete(session.Subscriptions, subscription.ID)
 			Subscribe[I](session, uri, options, procedure)
 		}
-		session.restorables[subscription.ID] = onRejoin
+		session.restores[subscription.ID] = onRejoin
 
 		return subscription, nil
 	}
@@ -309,7 +313,7 @@ func Register[I, O any](
 			delete(session.Registrations, registration.ID)
 			Register[I, O](session, uri, options, procedure)
 		}
-		session.restorables[registration.ID] = onRejoin
+		session.restores[registration.ID] = onRejoin
 
 		return registration, nil
 	}
@@ -332,7 +336,7 @@ func Unsubscribe(
 	_, _, e := pendingResponse.Await()
 	if e == nil {
 		delete(session.Subscriptions, subscriptionID)
-		delete(session.restorables, subscriptionID)
+		delete(session.restores, subscriptionID)
 		session.logger.Debug("subscription successfully dettached", logData)
 	}
 	session.logger.Error("during unsubscribe", "error", e, logData)
@@ -353,7 +357,7 @@ func Unregister(
 	_, _, e := pendingResponse.Await()
 	if e == nil {
 		delete(session.Registrations, registrationID)
-		delete(session.restorables, registrationID)
+		delete(session.restores, registrationID)
 		session.logger.Debug("registration successfully dettached", logData)
 	}
 	session.logger.Error("during unregister", "error", e, logData)
@@ -440,7 +444,7 @@ func (generator *remoteGenerator[T]) Next(
 		responseTimeout,
 	)
 	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
-	ok := generator.peer.Send(nextEvent, DEFAULT_RESEND_COUNT)
+	ok := generator.peer.Send(nextEvent, default_resend_count)
 	if !ok {
 		generator.logger.Error("next event dispatch error", logData)
 		cancelResponsePromise()
@@ -469,7 +473,7 @@ func (generator *remoteGenerator[T]) Stop() error {
 	generator.logger.Debug("trying to stop generator")
 
 	stopEvent := NewStopEvent(generator.ID)
-	ok := generator.peer.Send(stopEvent, DEFAULT_RESEND_COUNT)
+	ok := generator.peer.Send(stopEvent, default_resend_count)
 	if ok {
 		generator.done = true
 		generator.logger.Debug("generator successfully stopped")
@@ -501,7 +505,7 @@ func yieldNext(
 	stopEventPromise, cancelStopEventPromise := router.PendingCancelEvents.New(generatorID, lifetime)
 
 	logger.Debug("trying to send yield event")
-	ok := router.Send(yieldEvent, DEFAULT_RESEND_COUNT)
+	ok := router.Send(yieldEvent, default_resend_count)
 	if !ok {
 		logger.Error("yield event dispatch error (destroying generator)")
 		cancelNextEventPromise()

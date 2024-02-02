@@ -60,7 +60,7 @@ func WebsocketConnect(
 
 	transport, e := connect()
 	if e == nil {
-		instance := NewReconnectableTransport(
+		instance := MakeReconnectable(
 			transport,
 			strategy,
 			connect,

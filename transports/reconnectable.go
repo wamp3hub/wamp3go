@@ -23,7 +23,7 @@ type reconnectableTransport struct {
 	logger   *slog.Logger
 }
 
-func NewReconnectableTransport(
+func MakeReconnectable(
 	base wamp.Transport,
 	strategy wampShared.RetryStrategy,
 	connect func() (wamp.Transport, error),

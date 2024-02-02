@@ -10,15 +10,14 @@ import (
 )
 
 const (
-	DEFAULT_TIMEOUT      = 60
-	DEFAULT_RESEND_COUNT = 3
+	default_send_timeout = 60
+	default_resend_count = 3
 )
 
 var (
 	ErrorSerialization      = errors.New("serialization error")
 	ErrorConnectionRestored = errors.New("connection was restored")
 	ErrorConnectionClosed   = errors.New("connection is closed")
-	ErrorTimedOut           = errors.New("timed out")
 )
 
 type Serializer interface {
@@ -78,7 +77,7 @@ func (peer *Peer) acknowledge(source Event) bool {
 		"Kind", source.Kind(),
 	)
 	acceptEvent := newAcceptEvent(source)
-	for i := DEFAULT_RESEND_COUNT; i > -1; i-- {
+	for i := default_resend_count; i > -1; i-- {
 		e := peer.transport.Write(acceptEvent)
 		if e == nil {
 			peer.logger.Debug("acknowledgement successfully sent", logData)
@@ -104,17 +103,18 @@ func (peer *Peer) Send(event Event, retryCount int) bool {
 	)
 	peer.logger.Debug("trying to send", logData)
 
-	// creates a timeless promise, because the timeout is manually
+	// creates a promise that does not expire
 	acceptEventPromise, cancelAcceptEventPromise := peer.pendingAcceptEvents.New(event.ID(), 0)
 
 	e := peer.transport.Write(event)
 	if e == nil {
 		peer.logger.Debug("event successfully sent", logData)
+
 		select {
 		case <-acceptEventPromise:
 			peer.logger.Debug("event successfully delivered", logData)
 			return true
-		case <-time.After(DEFAULT_TIMEOUT * time.Second):
+		case <-time.After(default_send_timeout * time.Second):
 			e = errors.New("event not delivered (TimedOut)")
 		}
 	}
@@ -125,7 +125,7 @@ func (peer *Peer) Send(event Event, retryCount int) bool {
 }
 
 func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
-	peer.logger.Debug("reading begin")
+	peer.logger.Debug("reading incoming events begin")
 	wg.Done()
 
 	for {
@@ -141,19 +141,22 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 				peer.RejoinEvents.Next(struct{}{})
 			}
 
-			peer.logger.Warn("during read", "error", e)
+			peer.logger.Warn("during read event", "error", e)
 			// TODO count errors
+			// TODO rate limit if error count exceeded
 			continue
 		}
+
+		event.setRouter(peer)
 
 		logData := slog.Group(
 			"event",
 			"ID", event.ID(),
 			"Kind", event.Kind(),
 		)
-		peer.logger.Debug("new", logData)
+		peer.logger.Debug("new event", logData)
 
-		event.setRouter(peer)
+		// TODO exclude duplicates
 
 		switch event := event.(type) {
 		case AcceptEvent:
@@ -182,9 +185,9 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 		}
 
 		if e == nil {
-			peer.logger.Debug("read success", logData)
+			peer.logger.Debug("read event success", logData)
 		} else {
-			peer.logger.Error("during read", "error", e, logData)
+			peer.logger.Error("during read event", "error", e, logData)
 		}
 	}
 
@@ -192,7 +195,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 	peer.IncomingCallEvents.Complete()
 	peer.RejoinEvents.Complete()
 
-	peer.logger.Debug("reading end")
+	peer.logger.Debug("reading incoming events end")
 }
 
 // Closes the connection
