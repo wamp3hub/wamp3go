@@ -43,7 +43,7 @@ func main() {
 		panic("register error")
 	}
 
-	generator, e := wamp.NewRemoteGenerator[int](
+	generator, e := wamp.CallGenerator[int](
 		session,
 		&wamp.CallFeatures{URI: "net.example.reverse"},
 		100,

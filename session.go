@@ -395,26 +395,41 @@ func (generator *remoteGenerator[T]) Active() bool {
 	return !generator.done
 }
 
-func NewRemoteGenerator[O, I any](
+func NewRemoteGenerator[T any](
+	session *Session,
+	initialEvent YieldEvent,
+) *remoteGenerator[T] {
+	payload, _ := ReadPayload[NewGeneratorPayload](initialEvent)
+	logData := slog.Group(
+		"generator",
+		"ID", payload.ID,
+	)
+	return &remoteGenerator[T]{
+		false,
+		payload.ID,
+		initialEvent.ID(),
+		session.router,
+		session.logger.With("name", "RemoteGenerator", logData),
+	}
+}
+
+func CallGenerator[O, I any](
 	session *Session,
 	features *CallFeatures,
 	inPayload I,
 ) (*remoteGenerator[O], error) {
-	logData := slog.Group("generator", "URI", features.URI)
+	logData := slog.Group(
+		"generator",
+		"URI", features.URI,
+	)
 	session.logger.Debug("trying to initialize remote generator", logData)
-	pendingResponse := Call[NewGeneratorPayload](session, features, inPayload)
-	yieldEvent, generator, e := pendingResponse.Await()
+
+	pendingResponse := Call[any](session, features, inPayload)
+	yieldEvent, _, e := pendingResponse.Await()
 	if e == nil {
-		logData = slog.Group("generator", "ID", generator.ID, "URI", features.URI)
-		instance := remoteGenerator[O]{
-			false,
-			generator.ID,
-			yieldEvent.ID(),
-			session.router,
-			session.logger.With("name", "RemoteGenerator", logData),
-		}
 		session.logger.Debug("remote generator successfully initialized", logData)
-		return &instance, nil
+		generator := NewRemoteGenerator[O](session, yieldEvent)
+		return generator, nil
 	}
 
 	session.logger.Error("during initialize remote generator", "error", e, logData)
