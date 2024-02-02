@@ -24,22 +24,24 @@ type reconnectableTransport struct {
 }
 
 func MakeReconnectable(
-	base wamp.Transport,
 	strategy wampShared.RetryStrategy,
 	connect func() (wamp.Transport, error),
 	logger *slog.Logger,
-) *reconnectableTransport {
-	return &reconnectableTransport{
+) (*reconnectableTransport, error) {
+	instance := reconnectableTransport{
 		true,
 		new(sync.Mutex),
 		new(sync.Mutex),
-		base,
+		nil,
 		strategy,
 		connect,
 		logger.With(
 			"name", "reconnectable",
 		),
 	}
+
+	e := instance.reconnect()
+	return &instance, e
 }
 
 // Pause IO operations
@@ -64,15 +66,6 @@ func (reconnectable *reconnectableTransport) Close() error {
 	return reconnectable.base.Close()
 }
 
-// Swap the underlying transport
-func (reconnectable *reconnectableTransport) hotSwap(newTransport wamp.Transport) {
-	reconnectable.Pause()
-	// close previous transport
-	reconnectable.Close()
-	reconnectable.base = newTransport
-	reconnectable.Resume()
-}
-
 func (reconnectable *reconnectableTransport) reconnect() error {
 	if reconnectable.strategy.AttemptNumber() == 0 {
 		reconnectable.Pause()
@@ -84,19 +77,31 @@ func (reconnectable *reconnectableTransport) reconnect() error {
 	}
 
 	sleepDuration := reconnectable.strategy.Next()
-	reconnectable.logger.Debug("sleeping...", "duration", sleepDuration)
-	time.Sleep(sleepDuration)
+	if sleepDuration > 0 {
+		reconnectable.logger.Debug("sleeping...", "duration", sleepDuration)
+		time.Sleep(sleepDuration)
+	}
 
-	reconnectable.logger.Warn("reconnecting...")
+	reconnectable.logger.Warn("connecting...")
 	newTransport, e := reconnectable.connect()
 	if e != nil {
-		reconnectable.logger.Error("during reconnect", "error", e)
+		reconnectable.logger.Error("during connect", "error", e)
 		return reconnectable.reconnect()
 	}
 
-	reconnectable.logger.Info("successfully reconnected")
+	reconnectable.logger.Info("successfully connected")
 	reconnectable.strategy.Reset()
-	reconnectable.hotSwap(newTransport)
+	if reconnectable.base == nil {
+		// close previous transport
+		e = reconnectable.Close()
+		if e == nil {
+			reconnectable.logger.Debug("broken transport successfully closed")
+		} else {
+			reconnectable.logger.Warn("during close broken transport", "error", e)
+		}
+	}
+	reconnectable.base = newTransport
+	reconnectable.Resume()
 	return wamp.ErrorConnectionRestored
 }
 

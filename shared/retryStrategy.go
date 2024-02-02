@@ -72,7 +72,7 @@ func (rs *backoffRS) Next() time.Duration {
 	d := rs.base.Next()
 	// f^n, where f is the factor and n is the attempt number
 	e := math.Pow(rs.f, float64(rs.AttemptNumber() - 1))
-	v := time.Duration(e)*time.Second + d
+	v := time.Duration(e - 1)*time.Second + d
 	if v > rs.up {
 		v = rs.up
 	}

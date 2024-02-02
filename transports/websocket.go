@@ -58,17 +58,12 @@ func WebsocketConnect(
 		return nil, e
 	}
 
-	transport, e := connect()
-	if e == nil {
-		instance := MakeReconnectable(
-			transport,
-			strategy,
-			connect,
-			logger,
-		)
-		return instance, nil
-	}
-	return nil, e
+	instance, e := MakeReconnectable(
+		strategy,
+		connect,
+		logger,
+	)
+	return instance, e
 }
 
 type WebsocketJoinOptions struct {
@@ -120,7 +115,7 @@ func WebsocketJoin(
 		"routerID", payload.RouterID,
 		"ticket", payload.Ticket,
 	)
-	logger.Debug("interview has been completed", joinOptionsLogData, interviewLogData)
+	logger.Debug("interview successfully", joinOptionsLogData, interviewLogData)
 
 	protocol := "ws"
 	if joinOptions.Secure {
