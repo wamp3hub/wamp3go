@@ -15,8 +15,8 @@ func main() {
 	}
 
 	session, e := wampTransports.WebsocketJoin(
+		"0.0.0.0:8800",
 		&wampTransports.WebsocketJoinOptions{
-			Address:     "0.0.0.0:8800",
 			Credentials: &LoginPayload{"test", "test"},
 		},
 	)

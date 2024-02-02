@@ -30,7 +30,7 @@ func (object *Observable[T]) Observe(next nextFunction[T], complete completeFunc
 func (object *Observable[T]) Next(v T) {
 	// TODO rate limiting
 	for _, instance := range object.observers {
-		go instance.next(v)
+		instance.next(v)
 	}
 }
 
@@ -38,7 +38,7 @@ func (object *Observable[T]) Complete() {
 	object.mutex.Lock()
 	object.done = true
 	for _, instance := range object.observers {
-		go instance.complete()
+		instance.complete()
 	}
 	clear(object.observers)
 }

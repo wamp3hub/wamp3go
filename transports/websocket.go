@@ -73,7 +73,6 @@ func WebsocketConnect(
 
 type WebsocketJoinOptions struct {
 	Secure               bool
-	Address              string
 	Serializer           wamp.Serializer
 	Credentials          any
 	LoggingHandler       slog.Handler
@@ -81,6 +80,7 @@ type WebsocketJoinOptions struct {
 }
 
 func WebsocketJoin(
+	address string,
 	joinOptions *WebsocketJoinOptions,
 ) (*wamp.Session, error) {
 	if joinOptions.Serializer == nil {
@@ -99,13 +99,13 @@ func WebsocketJoin(
 	logger := slog.New(joinOptions.LoggingHandler)
 	joinOptionsLogData := slog.Group(
 		"joinOptions",
-		"address", joinOptions.Address,
+		"address", address,
 		"secure", joinOptions.Secure,
 	)
 	logger.Debug("trying to join", joinOptionsLogData)
 
 	payload, e := wampInterview.HTTP2Interview(
-		joinOptions.Address,
+		address,
 		joinOptions.Secure,
 		&wampInterview.Payload{Credentials: joinOptions.Credentials},
 	)
@@ -128,7 +128,7 @@ func WebsocketJoin(
 	}
 	wsAddress := fmt.Sprintf(
 		"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
-		protocol, joinOptions.Address, payload.Ticket, joinOptions.Serializer.Code(),
+		protocol, address, payload.Ticket, joinOptions.Serializer.Code(),
 	)
 	transport, e := WebsocketConnect(
 		wsAddress, joinOptions.Serializer, joinOptions.ReconnectionStrategy, logger,

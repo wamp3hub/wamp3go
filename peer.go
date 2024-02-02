@@ -167,10 +167,10 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 			peer.acknowledge(event)
 			e = peer.PendingReplyEvents.Complete(features.InvocationID, event)
 		case PublishEvent:
-			peer.IncomingPublishEvents.Next(event)
+			go peer.IncomingPublishEvents.Next(event)
 			peer.acknowledge(event)
 		case CallEvent:
-			peer.IncomingCallEvents.Next(event)
+			go peer.IncomingCallEvents.Next(event)
 			peer.acknowledge(event)
 		case NextEvent:
 			features := event.Features()
