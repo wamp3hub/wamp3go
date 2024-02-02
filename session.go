@@ -106,7 +106,7 @@ func NewSession(
 
 				replyEventLogData := slog.Group("replyEvent", "ID", replyEvent.ID())
 
-				ok := session.router.Send(replyEvent, default_resend_count)
+				ok := session.router.Send(replyEvent, DEFAULT_RESEND_COUNT)
 				if ok {
 					session.logger.Debug("call event processed successfully", callEventLogData, replyEventLogData)
 				} else {
@@ -151,7 +151,7 @@ func Publish[I any](
 	)
 
 	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(publishEvent, default_resend_count)
+	ok := session.router.Send(publishEvent, DEFAULT_RESEND_COUNT)
 	if ok {
 		session.logger.Debug("publication successfully sent", logData)
 		return nil
@@ -225,7 +225,7 @@ func Call[O, I any](
 	cancelCallEvent := func() {
 		session.logger.Debug("trying to cancel invocation", logData)
 		cancelEvent := newCancelEvent(callEvent)
-		ok := session.router.Send(cancelEvent, default_resend_count)
+		ok := session.router.Send(cancelEvent, DEFAULT_RESEND_COUNT)
 		if ok {
 			session.logger.Debug("invocation successfully cancelled", logData)
 		} else {
@@ -237,7 +237,7 @@ func Call[O, I any](
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 
 	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(callEvent, default_resend_count)
+	ok := session.router.Send(callEvent, DEFAULT_RESEND_COUNT)
 	if ok {
 		session.logger.Debug("call event successfully sent", logData)
 	} else {
@@ -459,7 +459,7 @@ func (generator *remoteGenerator[T]) Next(
 		responseTimeout,
 	)
 	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
-	ok := generator.peer.Send(nextEvent, default_resend_count)
+	ok := generator.peer.Send(nextEvent, DEFAULT_RESEND_COUNT)
 	if !ok {
 		generator.logger.Error("next event dispatch error", logData)
 		cancelResponsePromise()
@@ -488,7 +488,7 @@ func (generator *remoteGenerator[T]) Stop() error {
 	generator.logger.Debug("trying to stop generator")
 
 	stopEvent := NewStopEvent(generator.ID)
-	ok := generator.peer.Send(stopEvent, default_resend_count)
+	ok := generator.peer.Send(stopEvent, DEFAULT_RESEND_COUNT)
 	if ok {
 		generator.done = true
 		generator.logger.Debug("generator successfully stopped")
@@ -520,7 +520,7 @@ func yieldNext(
 	stopEventPromise, cancelStopEventPromise := router.PendingCancelEvents.New(generatorID, lifetime)
 
 	logger.Debug("trying to send yield event")
-	ok := router.Send(yieldEvent, default_resend_count)
+	ok := router.Send(yieldEvent, DEFAULT_RESEND_COUNT)
 	if !ok {
 		logger.Error("yield event dispatch error (destroying generator)")
 		cancelNextEventPromise()

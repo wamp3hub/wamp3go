@@ -11,7 +11,7 @@ import (
 
 const (
 	default_send_timeout = 60
-	default_resend_count = 3
+	DEFAULT_RESEND_COUNT = 3
 )
 
 var (
@@ -77,7 +77,7 @@ func (peer *Peer) acknowledge(source Event) bool {
 		"Kind", source.Kind(),
 	)
 	acceptEvent := newAcceptEvent(source)
-	for i := default_resend_count; i > -1; i-- {
+	for i := DEFAULT_RESEND_COUNT; i > -1; i-- {
 		e := peer.transport.Write(acceptEvent)
 		if e == nil {
 			peer.logger.Debug("acknowledgement successfully sent", logData)

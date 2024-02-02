@@ -91,7 +91,7 @@ func (reconnectable *reconnectableTransport) reconnect() error {
 
 	reconnectable.logger.Info("successfully connected")
 	reconnectable.strategy.Reset()
-	if reconnectable.base == nil {
+	if reconnectable.base != nil {
 		// close previous transport
 		e = reconnectable.Close()
 		if e == nil {
