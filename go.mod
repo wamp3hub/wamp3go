@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/gorilla/websocket v1.5.1
+	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/rs/xid v1.5.0
 )
 
