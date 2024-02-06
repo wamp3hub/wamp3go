@@ -39,12 +39,12 @@ func jsonPostRequest(url string, payload any) (response *http.Response, e error)
 			return response, nil
 		}
 	}
-	return nil, errors.Join(e, errors.New("failed to send HTTP request"))
+	return nil, errors.Join(e, errors.New("during send HTTP request"))
 }
 
 func JSONPost[T any](url string, inPayload any) (*T, error) {
 	response, e := jsonPostRequest(url, inPayload)
-	if e == nil {
+	if e == nil && response.StatusCode == 200 {
 		outPayload := new(T)
 		e = ReadJSONBody(response.Body, outPayload)
 		if e == nil {

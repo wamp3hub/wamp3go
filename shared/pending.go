@@ -2,70 +2,50 @@ package wampShared
 
 import (
 	"errors"
-	"sync"
 	"time"
+
+	cmap "github.com/orcaman/concurrent-map/v2"
 )
 
 var ErrorPendingNotFound = errors.New("PendingNotFound")
 
 type PendingMap[T any] struct {
-	safeMap map[string]CompletePromise[T]
-	mutex   *sync.RWMutex
+	safeMap cmap.ConcurrentMap[string, CompletePromise[T]]
 }
 
 func NewPendingMap[T any]() *PendingMap[T] {
 	return &PendingMap[T]{
-		make(map[string]CompletePromise[T]),
-		new(sync.RWMutex),
+		cmap.New[CompletePromise[T]](),
 	}
-}
-
-func (pendingMap PendingMap[T]) safeGet(key string) (CompletePromise[T], bool) {
-	pendingMap.mutex.RLock()
-	defer pendingMap.mutex.RUnlock()
-	value, exists := pendingMap.safeMap[key]
-	return value, exists
-}
-
-func (pendingMap PendingMap[T]) safeSet(key string, value CompletePromise[T]) {
-	pendingMap.mutex.Lock()
-	pendingMap.safeMap[key] = value
-	pendingMap.mutex.Unlock()
-}
-
-func (pendingMap PendingMap[T]) safeDelete(key string) {
-	pendingMap.mutex.Lock()
-	delete(pendingMap.safeMap, key)
-	pendingMap.mutex.Unlock()
 }
 
 func (pendingMap PendingMap[T]) New(
 	key string,
 	timeout time.Duration,
 ) (Promise[T], CancelPromise) {
-	_, exists := pendingMap.safeGet(key)
-	if exists {
+	_, ok := pendingMap.safeMap.Get(key)
+	if ok {
 		// Instead of using panic when a pending already exists, consider returning an error.
 		// This would allow the caller to decide how to handle this situation.
 		panic("pending already exists")
 	}
 
-	pending, completePromise, cancelPromise := NewPromise[T](timeout)
+	promise, completePromise, cancelPromise := NewPromise[T](timeout)
 
-	pendingMap.safeSet(key, completePromise)
+	pendingMap.safeMap.Set(key, completePromise)
 
 	cancelPending := func() {
-		pendingMap.safeDelete(key)
+		pendingMap.safeMap.Remove(key)
 		cancelPromise()
 	}
 
-	return pending, cancelPending
+	return promise, cancelPending
 }
 
 func (pendingMap PendingMap[T]) Complete(key string, value T) error {
-	completePending, exists := pendingMap.safeGet(key)
+	completePending, exists := pendingMap.safeMap.Get(key)
 	if exists {
-		pendingMap.safeDelete(key)
+		pendingMap.safeMap.Remove(key)
 		completePending(value)
 		return nil
 	}
