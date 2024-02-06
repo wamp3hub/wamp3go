@@ -52,6 +52,7 @@ func (resumable *ResumableTransport) Read() (wamp.Event, error) {
 }
 
 func (resumable *ResumableTransport) Write(event wamp.Event) error {
+	// prevent concurrent writes
 	resumable.writing.Lock()
 	defer resumable.writing.Unlock()
 	return resumable.transport.Write(event)
