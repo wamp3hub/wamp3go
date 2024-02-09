@@ -145,7 +145,7 @@ func Publish[I any](
 		),
 	)
 
-	if (len(features.IncludeSubscribers) + len(features.IncludeRoles)) == 0 {
+	if len(features.IncludeRoles) == 0 {
 		__logger.Warn("fill in the list of allowed subscribers or roles for security reasons")
 	}
 
