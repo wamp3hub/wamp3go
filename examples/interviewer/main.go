@@ -49,7 +49,9 @@ func main() {
 	registration, e := wamp.Register(
 		session,
 		"wamp.authenticate",
-		&wamp.RegisterOptions{},
+		&wamp.RegisterOptions{
+			IncludeRoles: []string{"root"},
+		},
 		func(resume wampInterview.Resume[*LoginPayload], callEvent wamp.CallEvent) (*wampInterview.Offer, error) {
 			if resume.Role == "guest" {
 				offer := wampInterview.Offer{
