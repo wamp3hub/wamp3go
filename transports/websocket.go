@@ -145,10 +145,9 @@ func WebsocketJoin(
 	}
 
 	peerDetails := wamp.PeerDetails{
-		ID:                 interviewResult.YourID,
-		Role:               role,
-		RegistrationsLimit: interviewResult.Offer.RegistrationsLimit,
-		SubscriptionsLimit: interviewResult.Offer.SubscriptionsLimit,
+		ID:    interviewResult.YourID,
+		Role:  role,
+		Offer: interviewResult.Offer,
 	}
 	peer := wamp.SpawnPeer(&peerDetails, transport, logger)
 	session := wamp.NewSession(peer, logger)

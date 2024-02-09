@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	wampInterview "github.com/wamp3hub/wamp3go/interview"
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
@@ -33,10 +34,9 @@ type Transport interface {
 }
 
 type PeerDetails struct {
-	ID                 string
-	Role               string
-	RegistrationsLimit uint32
-	SubscriptionsLimit uint32
+	ID    string
+	Role  string
+	Offer *wampInterview.Offer
 }
 
 type Peer struct {

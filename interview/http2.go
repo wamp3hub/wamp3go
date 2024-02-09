@@ -14,6 +14,7 @@ type Resume[T any] struct {
 type Offer struct {
 	RegistrationsLimit uint32 `json:"registrationsLimit"`
 	SubscriptionsLimit uint32 `json:"subscriptionsLimit"`
+	TicketLifeTime     uint64 `json:"ticketLifeTime"`
 }
 
 type Result struct {
