@@ -30,7 +30,11 @@ func testAcceptEventSerializer(t *testing.T, serializer wamp.Serializer) {
 }
 
 func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	expectedFeatures := wamp.PublishFeatures{URI: "wamp.test", Include: []string{}, Exclude: []string{wampShared.NewID()}}
+	expectedFeatures := wamp.PublishFeatures{
+		URI: "wamp.test",
+		IncludeSubscribers: []string{},
+		ExcludeSubscribers: []string{wampShared.NewID()},
+	}
 	expectedPayload := "test"
 	event := wamp.MakePublishEvent(
 		wampShared.NewID(),

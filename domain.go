@@ -1,6 +1,7 @@
 package wamp
 
 import (
+	"slices"
 	"strings"
 
 	wampShared "github.com/wamp3hub/wamp3go/shared"
@@ -93,9 +94,20 @@ func newAcceptEvent(source Event) AcceptEvent {
 }
 
 type PublishFeatures struct {
-	URI     string   `json:"URI"`
-	Include []string `json:"include"`
-	Exclude []string `json:"exclude"`
+	URI                string   `json:"URI"`
+	ExcludeSubscribers []string `json:"excludeSubscribers"`
+	ExcludeRoles       []string `json:"excludeRoles"`
+	IncludeSubscribers []string `json:"includeSubscribers"`
+	IncludeRoles       []string `json:"includeRoles"`
+}
+
+func (features *PublishFeatures) Authorized(subscriberID string, role string) bool {
+	if slices.Contains(features.ExcludeSubscribers, subscriberID) ||
+		slices.Contains(features.ExcludeRoles, role) {
+		return false
+	}
+	return (len(features.IncludeSubscribers) == 0 || slices.Contains(features.IncludeSubscribers, subscriberID)) &&
+		(len(features.IncludeRoles) == 0 || slices.Contains(features.IncludeRoles, role))
 }
 
 type PublishRoute struct {
@@ -140,8 +152,17 @@ func newPublishEvent[T any](features *PublishFeatures, data T) PublishEvent {
 }
 
 type CallFeatures struct {
-	URI     string `json:"URI"`
-	Timeout uint64 `json:"timeout"`
+	URI          string   `json:"URI"`
+	Timeout      uint64   `json:"timeout"`
+	ExcludeRoles []string `json:"excludeRoles"`
+	IncludeRoles []string `json:"includeRoles"`
+}
+
+func (features *CallFeatures) Authorized(role string) bool {
+	if slices.Contains(features.ExcludeRoles, role) {
+		return false
+	}
+	return len(features.IncludeRoles) == 0 || slices.Contains(features.IncludeRoles, role)
 }
 
 type CallRoute struct {
@@ -309,7 +330,16 @@ func (resource *Resource[T]) Native() bool {
 }
 
 type resourceOptions struct {
-	Route []string `json:"route"`
+	Route        []string `json:"route"`
+	ExcludeRoles []string `json:"excludeRoles"`
+	IncludeRoles []string `json:"includeRoles"`
+}
+
+func (options *resourceOptions) Authorized(role string) bool {
+	if slices.Contains(options.ExcludeRoles, role) {
+		return false
+	}
+	return len(options.IncludeRoles) == 0 || slices.Contains(options.IncludeRoles, role)
 }
 
 func (options *resourceOptions) Entrypoint() string {

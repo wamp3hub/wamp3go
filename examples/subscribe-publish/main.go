@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"sync"
 
 	wamp "github.com/wamp3hub/wamp3go"
@@ -9,8 +9,7 @@ import (
 )
 
 func main() {
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
+	logger := slog.Default()
 
 	type LoginPayload struct {
 		Username string `json:"username"`
@@ -19,28 +18,41 @@ func main() {
 
 	session, e := wampTransports.WebsocketJoin(
 		"0.0.0.0:8800",
+		"customer",
 		&wampTransports.WebsocketJoinOptions{
-			Credentials: &LoginPayload{"test", "test"},
+			Credentials: &LoginPayload{"test", "secret"},
 		},
 	)
 	if e == nil {
-		fmt.Printf("WAMP Join Success\n")
+		logger.Info("WAMP Join Success", "sessionID", session.ID(), "role", session.Role())
 	} else {
+		logger.Error("during WAMP join", "error", e)
 		panic("WAMP Join Error")
 	}
 
-	wamp.Subscribe(
+	wg := new(sync.WaitGroup)
+	wg.Add(2)
+
+	subscription, e := wamp.Subscribe(
 		session,
-		"example.echo",
+		"net.example",
 		&wamp.SubscribeOptions{},
 		func(message string, publishEvent wamp.PublishEvent) {
-			fmt.Printf("new message %s\n", message)
+			logger.Info("new", "message", message)
 			wg.Done()
 		},
 	)
+	if e == nil {
+		logger.Info("subscribe success", "subscriptionID", subscription.ID)
+	} else {
+		logger.Error("during subscribe", "error", e)
+		panic("subscribe error")
+	}
 
-	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "Hello, WAMP!")
-	wamp.Publish(session, &wamp.PublishFeatures{URI: "example.echo"}, "How are you?")
+	wamp.Publish(session, &wamp.PublishFeatures{URI: "net.example"}, "Hello, WAMP!")
+	wamp.Publish(session, &wamp.PublishFeatures{URI: "net.example"}, "How are you?")
 
 	wg.Wait()
+
+	wamp.Leave(session, "done")
 }
