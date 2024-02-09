@@ -6,6 +6,7 @@ import (
 	wamp "github.com/wamp3hub/wamp3go"
 )
 
+// Wraps transport with pause and resume functionality
 type ResumableTransport struct {
 	open      bool
 	reading   sync.Locker
@@ -44,15 +45,15 @@ func (resumable *ResumableTransport) Close() error {
 	return resumable.transport.Close()
 }
 
+// prevent concurrent reads
 func (resumable *ResumableTransport) Read() (wamp.Event, error) {
-	// prevent concurrent reads
 	resumable.reading.Lock()
 	defer resumable.reading.Unlock()
 	return resumable.transport.Read()
 }
 
+// prevent concurrent writes
 func (resumable *ResumableTransport) Write(event wamp.Event) error {
-	// prevent concurrent writes
 	resumable.writing.Lock()
 	defer resumable.writing.Unlock()
 	return resumable.transport.Write(event)

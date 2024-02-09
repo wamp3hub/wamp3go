@@ -8,9 +8,9 @@ import (
 	"github.com/gorilla/websocket"
 
 	wamp "github.com/wamp3hub/wamp3go"
+	wampInterview "github.com/wamp3hub/wamp3go/interview"
 	wampSerializers "github.com/wamp3hub/wamp3go/serializers"
 	wampShared "github.com/wamp3hub/wamp3go/shared"
-	wampInterview "github.com/wamp3hub/wamp3go/transports/interview"
 )
 
 type WSTransport struct {
@@ -37,10 +37,22 @@ func (transport *WSTransport) Read() (wamp.Event, error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	if websocket.IsCloseError(e, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure) {
+	if websocket.IsCloseError(e, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 		return nil, wamp.ErrorConnectionClosed
 	}
 	return nil, ErrorBadConnection
+}
+
+func dialWebsocket(
+	address string,
+	serializer wamp.Serializer,
+) (wamp.Transport, error) {
+	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
+	if e == nil {
+		instance := WSTransport{address, serializer, connection}
+		return &instance, nil
+	}
+	return nil, e
 }
 
 func WebsocketConnect(
@@ -49,18 +61,11 @@ func WebsocketConnect(
 	strategy wampShared.RetryStrategy,
 	logger *slog.Logger,
 ) (wamp.Transport, error) {
-	connect := func() (wamp.Transport, error) {
-		connection, _, e := websocket.DefaultDialer.Dial(address, nil)
-		if e == nil {
-			instance := WSTransport{address, serializer, connection}
-			return &instance, nil
-		}
-		return nil, e
-	}
-
 	instance, e := MakeReconnectable(
+		func() (wamp.Transport, error) {
+			return dialWebsocket(address, serializer)
+		},
 		strategy,
-		connect,
 		logger,
 	)
 	return instance, e
@@ -76,8 +81,15 @@ type WebsocketJoinOptions struct {
 
 func WebsocketJoin(
 	address string,
+	role string,
 	joinOptions *WebsocketJoinOptions,
 ) (*wamp.Session, error) {
+	if len(role) == 0 {
+		role = "guest"
+	}
+	if joinOptions == nil {
+		joinOptions = new(WebsocketJoinOptions)
+	}
 	if joinOptions.Serializer == nil {
 		joinOptions.Serializer = wampSerializers.DefaultSerializer
 	}
@@ -93,16 +105,21 @@ func WebsocketJoin(
 
 	logger := slog.New(joinOptions.LoggingHandler)
 	joinOptionsLogData := slog.Group(
-		"joinOptions",
+		"options",
+		"role", role,
 		"address", address,
 		"secure", joinOptions.Secure,
+		"serializer", joinOptions.Serializer.Code(),
 	)
 	logger.Debug("trying to join", joinOptionsLogData)
 
-	payload, e := wampInterview.HTTP2Interview(
+	interviewResult, e := wampInterview.HTTP2Interview(
 		address,
 		joinOptions.Secure,
-		&wampInterview.Payload{Credentials: joinOptions.Credentials},
+		&wampInterview.Resume[any]{
+			Role:        role,
+			Credentials: joinOptions.Credentials,
+		},
 	)
 	if e != nil {
 		logger.Error("during interview", "error", e, joinOptionsLogData)
@@ -111,8 +128,8 @@ func WebsocketJoin(
 
 	interviewLogData := slog.Group(
 		"interview",
-		"peerID", payload.YourID,
-		"routerID", payload.RouterID,
+		"peerID", interviewResult.YourID,
+		"routerID", interviewResult.RouterID,
 	)
 	logger.Debug("interview successfully", joinOptionsLogData, interviewLogData)
 
@@ -122,7 +139,7 @@ func WebsocketJoin(
 	}
 	wsAddress := fmt.Sprintf(
 		"%s://%s/wamp/v1/websocket?ticket=%s&serializerCode=%s",
-		protocol, address, payload.Ticket, joinOptions.Serializer.Code(),
+		protocol, address, interviewResult.Ticket, joinOptions.Serializer.Code(),
 	)
 	transport, e := WebsocketConnect(
 		wsAddress, joinOptions.Serializer, joinOptions.ReconnectionStrategy, logger,
@@ -132,7 +149,12 @@ func WebsocketJoin(
 		return nil, e
 	}
 
-	peer := wamp.SpawnPeer(payload.YourID, transport, logger)
+	peerDetails := wamp.PeerDetails{
+		ID:    interviewResult.YourID,
+		Role:  role,
+		Offer: interviewResult.Offer,
+	}
+	peer := wamp.SpawnPeer(&peerDetails, transport, logger)
 	session := wamp.NewSession(peer, logger)
 	logger.Debug("successfully joined", joinOptionsLogData, interviewLogData)
 	return session, nil

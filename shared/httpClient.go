@@ -31,7 +31,7 @@ func ReadJSONBody(body io.ReadCloser, v any) error {
 	return e
 }
 
-func jsonPostRequest(url string, payload any) (response *http.Response, e error) {
+func fetchJSONPost(url string, payload any) (response *http.Response, e error) {
 	requestBody, e := MakeJSONBuffer(payload)
 	if e == nil {
 		response, e = http.Post(url, "application/json", requestBody)
@@ -43,7 +43,7 @@ func jsonPostRequest(url string, payload any) (response *http.Response, e error)
 }
 
 func JSONPost[T any](url string, inPayload any) (*T, error) {
-	response, e := jsonPostRequest(url, inPayload)
+	response, e := fetchJSONPost(url, inPayload)
 	if e == nil && response.StatusCode == 200 {
 		outPayload := new(T)
 		e = ReadJSONBody(response.Body, outPayload)

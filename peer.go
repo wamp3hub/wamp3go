@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	wampInterview "github.com/wamp3hub/wamp3go/interview"
 	wampShared "github.com/wamp3hub/wamp3go/shared"
 )
 
@@ -17,7 +18,7 @@ const (
 var (
 	ErrorSerialization      = errors.New("serialization error")
 	ErrorConnectionRestored = errors.New("connection was restored")
-	ErrorConnectionClosed   = errors.New("connection is closed")
+	ErrorConnectionClosed   = errors.New("connection was closed")
 )
 
 type Serializer interface {
@@ -32,8 +33,14 @@ type Transport interface {
 	Write(Event) error
 }
 
+type PeerDetails struct {
+	ID    string
+	Role  string
+	Offer *wampInterview.Offer
+}
+
 type Peer struct {
-	ID                    string
+	Details               *PeerDetails
 	transport             Transport
 	RejoinEvents          *wampShared.Observable[struct{}]
 	pendingAcceptEvents   *wampShared.PendingMap[AcceptEvent]
@@ -46,12 +53,12 @@ type Peer struct {
 }
 
 func newPeer(
-	ID string,
+	details *PeerDetails,
 	transport Transport,
 	logger *slog.Logger,
 ) *Peer {
 	return &Peer{
-		ID,
+		details,
 		transport,
 		wampShared.NewObservable[struct{}](),
 		wampShared.NewPendingMap[AcceptEvent](),
@@ -63,7 +70,8 @@ func newPeer(
 		logger.With(
 			slog.Group(
 				"peer",
-				"ID", ID,
+				"ID", details.ID,
+				"role", details.Role,
 			),
 		),
 	}
@@ -134,7 +142,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 
 		e := recover()
 		if e == nil {
-			peer.logger.Debug("reading of incoming events ended normally")
+			peer.logger.Debug("reading of incoming events end normally")
 		} else {
 			peer.logger.Warn("during read incoming events", "error", e)
 		}
@@ -146,24 +154,21 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 
 	for {
 		event, e := peer.transport.Read()
-		if e != nil {
-			if errors.Is(e, ErrorConnectionClosed) {
-				peer.logger.Warn("connection lost")
-				break
-			}
-
-			if errors.Is(e, ErrorConnectionRestored) {
-				peer.logger.Warn("connection restored")
-				peer.RejoinEvents.Next(struct{}{})
-			}
-
+		if e == nil {
+			event.setPeer(peer)
+		} else if errors.Is(e, ErrorConnectionClosed) {
+			peer.logger.Warn("connection lost")
+			break
+		} else if errors.Is(e, ErrorConnectionRestored) {
+			peer.logger.Warn("connection restored")
+			peer.RejoinEvents.Next(struct{}{})
+			continue
+		} else {
 			peer.logger.Warn("during read event", "error", e)
 			// TODO count errors
 			// TODO rate limit if error count exceeded
 			continue
 		}
-
-		event.setRouter(peer)
 
 		logData := slog.Group(
 			"event",
@@ -209,7 +214,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 }
 
 // Closes the connection
-func (peer *Peer) Close() error {
+func (peer *Peer) Close() {
 	peer.logger.Debug("trying to close...")
 	e := peer.transport.Close()
 	if e == nil {
@@ -217,15 +222,14 @@ func (peer *Peer) Close() error {
 	} else {
 		peer.logger.Error("during close", "error", e)
 	}
-	return e
 }
 
 func SpawnPeer(
-	ID string,
+	details *PeerDetails,
 	transport Transport,
 	logger *slog.Logger,
 ) *Peer {
-	peer := newPeer(ID, transport, logger)
+	peer := newPeer(details, transport, logger)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)

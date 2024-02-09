@@ -2,14 +2,15 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"time"
+	"log/slog"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampTransports "github.com/wamp3hub/wamp3go/transports"
 )
 
 func main() {
+	logger := slog.Default()
+
 	type LoginPayload struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -17,20 +18,24 @@ func main() {
 
 	session, e := wampTransports.WebsocketJoin(
 		"0.0.0.0:8800",
+		"customer",
 		&wampTransports.WebsocketJoinOptions{
-			Credentials: &LoginPayload{"test", "test"},
+			Credentials: &LoginPayload{"test", "secret"},
 		},
 	)
 	if e == nil {
-		fmt.Printf("WAMP Join Success\n")
+		logger.Info("WAMP Join Success", "sessionID", session.ID(), "role", session.Role())
 	} else {
+		logger.Error("during WAMP join", "error", e)
 		panic("WAMP Join Error")
 	}
 
 	registration, e := wamp.Register(
 		session,
 		"net.example.greeting",
-		&wamp.RegisterOptions{},
+		&wamp.RegisterOptions{
+			IncludeRoles: []string{"customer", "guest"},
+		},
 		func(name string, callEvent wamp.CallEvent) (string, error) {
 			if len(name) == 0 {
 				return "", errors.New("InvalidName")
@@ -40,22 +45,26 @@ func main() {
 		},
 	)
 	if e == nil {
-		fmt.Printf("register success ID=%s\n", registration.ID)
+		logger.Info("register success", "registrationID", registration.ID)
 	} else {
+		logger.Error("during register", "error", e)
 		panic("register error")
 	}
 
 	pendingResponse := wamp.Call[string](
 		session,
-		&wamp.CallFeatures{URI: "net.example.greeting"},
+		&wamp.CallFeatures{
+			URI: "net.example.greeting",
+			IncludeRoles: []string{"customer"},
+		},
 		"WAMP",
 	)
-	_, v, e := pendingResponse.Await()
+	_, result, e := pendingResponse.Await()
 	if e == nil {
-		fmt.Printf("call(example.greeting) %s\n", v)
+		logger.Info("call(example.greeting)", "result", result)
 	} else {
-		fmt.Printf("call(example.greeting) %s\n", e)
+		logger.Error("call(example.greeting)", "error", e)
 	}
 
-	time.Sleep(time.Minute)
+	wamp.Leave(session, "done")
 }

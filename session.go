@@ -14,52 +14,45 @@ const (
 )
 
 var (
-	ErrorDispatch          = errors.New("dispatch error")
-	ErrorTimedOut          = errors.New("timed out")
-	ErrorCancelled         = errors.New("cancelled")
-	ErrorGeneratorExit     = errors.New("generator exit")
-	ErrorProcedureNotFound = errors.New("procedure not found")
+	ErrorDispatch  = errors.New("dispatch error")
+	ErrorTimedOut  = errors.New("timedout")
+	ErrorCancelled = errors.New("cancelled")
 )
-
-type generatorExitException struct {
-	Source Event
-}
-
-func (generatorExitException) Error() string {
-	return "GeneratorExit"
-}
-
-func GeneratorExit(source Event) *generatorExitException {
-	return &generatorExitException{source}
-}
 
 type Session struct {
 	Subscriptions map[string]publishEventEndpoint
 	Registrations map[string]callEventEndpoint
 	restores      map[string]func()
-	router        *Peer
+	peer          *Peer
 	logger        *slog.Logger
 }
 
 func (session *Session) ID() string {
-	return session.router.ID
+	return session.peer.Details.ID
+}
+
+func (session *Session) Role() string {
+	return session.peer.Details.Role
 }
 
 func NewSession(
-	router *Peer,
+	peer *Peer,
 	logger *slog.Logger,
 ) *Session {
 	session := Session{
 		make(map[string]publishEventEndpoint),
 		make(map[string]callEventEndpoint),
 		make(map[string]func()),
-		router,
+		peer,
 		logger.With(
-			slog.Group("session", "ID", router.ID),
+			slog.Group(
+				"session",
+				"ID", peer.Details.ID,
+			),
 		),
 	}
 
-	session.router.IncomingPublishEvents.Observe(
+	session.peer.IncomingPublishEvents.Observe(
 		func(publishEvent PublishEvent) {
 			features := publishEvent.Features()
 			route := publishEvent.Route()
@@ -86,7 +79,7 @@ func NewSession(
 		},
 	)
 
-	session.router.IncomingCallEvents.Observe(
+	session.peer.IncomingCallEvents.Observe(
 		func(callEvent CallEvent) {
 			features := callEvent.Features()
 			route := callEvent.Route()
@@ -106,7 +99,7 @@ func NewSession(
 
 				replyEventLogData := slog.Group("replyEvent", "ID", replyEvent.ID())
 
-				ok := session.router.Send(replyEvent, DEFAULT_RESEND_COUNT)
+				ok := session.peer.Send(replyEvent, DEFAULT_RESEND_COUNT)
 				if ok {
 					session.logger.Debug("call event processed successfully", callEventLogData, replyEventLogData)
 				} else {
@@ -122,7 +115,7 @@ func NewSession(
 		},
 	)
 
-	session.router.RejoinEvents.Observe(
+	session.peer.RejoinEvents.Observe(
 		func(__ struct{}) {
 			for name, restore := range session.restores {
 				session.logger.Debug("restoring", "name", name)
@@ -144,20 +137,26 @@ func Publish[I any](
 ) error {
 	publishEvent := newPublishEvent(features, payload)
 
-	logData := slog.Group(
-		"publishEvent",
-		"ID", publishEvent.ID(),
-		"URI", features.URI,
+	__logger := session.logger.With(
+		slog.Group(
+			"publishEvent",
+			"ID", publishEvent.ID(),
+			"URI", features.URI,
+		),
 	)
 
-	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(publishEvent, DEFAULT_RESEND_COUNT)
+	if len(features.IncludeRoles) == 0 {
+		__logger.Warn("fill in the list of allowed subscribers or roles for security reasons")
+	}
+
+	__logger.Debug("trying to send call event")
+	ok := session.peer.Send(publishEvent, DEFAULT_RESEND_COUNT)
 	if ok {
-		session.logger.Debug("publication successfully sent", logData)
+		__logger.Debug("publication successfully sent")
 		return nil
 	}
 
-	session.logger.Error("publish event dispatch error", logData)
+	__logger.Error("publish event dispatch error")
 	return ErrorDispatch
 }
 
@@ -210,40 +209,46 @@ func Call[O, I any](
 
 	callEvent := newCallEvent[I](features, payload)
 
-	logData := slog.Group(
-		"callEvent",
-		"ID", callEvent.ID(),
-		"URI", features.URI,
-		"Timeout", features.Timeout,
+	__logger := session.logger.With(
+		slog.Group(
+			"callEvent",
+			"ID", callEvent.ID(),
+			"URI", features.URI,
+			"Timeout", features.Timeout,
+		),
 	)
 
-	replyTimeout := time.Duration(2*features.Timeout) * time.Second
-	replyEventPromise, cancelReplyEventPromise := session.router.PendingReplyEvents.New(
+	if len(features.IncludeRoles) == 0 {
+		__logger.Warn("fill in the list of allowed executor roles for security reasons")
+	}
+
+	replyTimeout := time.Duration(features.Timeout)*time.Second + time.Second
+	replyEventPromise, cancelReplyEventPromise := session.peer.PendingReplyEvents.New(
 		callEvent.ID(), replyTimeout,
 	)
 
 	cancelCallEvent := func() {
-		session.logger.Debug("trying to cancel invocation", logData)
+		__logger.Debug("trying to cancel invocation")
 		cancelEvent := newCancelEvent(callEvent)
-		ok := session.router.Send(cancelEvent, DEFAULT_RESEND_COUNT)
+		ok := session.peer.Send(cancelEvent, DEFAULT_RESEND_COUNT)
 		if ok {
-			session.logger.Debug("invocation successfully cancelled", logData)
+			__logger.Debug("invocation successfully cancelled")
 		} else {
-			session.logger.Error("call event dispatch error", logData)
+			__logger.Error("call event dispatch error")
 		}
 		cancelReplyEventPromise()
 	}
 
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 
-	session.logger.Debug("trying to send call event", logData)
-	ok := session.router.Send(callEvent, DEFAULT_RESEND_COUNT)
+	__logger.Debug("trying to send call event")
+	ok := session.peer.Send(callEvent, DEFAULT_RESEND_COUNT)
 	if ok {
-		session.logger.Debug("call event successfully sent", logData)
+		__logger.Debug("call event successfully sent")
 	} else {
-		session.logger.Error("call event dispatch error", logData)
+		__logger.Error("call event dispatch error")
 		errorEvent := NewErrorEvent(callEvent, ErrorDispatch)
-		session.router.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
+		session.peer.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
 	}
 
 	return pendingResponse
@@ -260,20 +265,29 @@ func Subscribe[I any](
 	options *SubscribeOptions,
 	procedure ProcedureToPublish[I],
 ) (*Subscription, error) {
-	logData := slog.Group("subscription", "URI", uri)
-	session.logger.Debug("trying to subscribe", logData)
+	__logger := session.logger.With(
+		slog.Group(
+			"subscription",
+			"URI", uri,
+		),
+	)
+	__logger.Debug("trying to subscribe")
+
+	if len(options.IncludeRoles) == 0 {
+		__logger.Warn("fill in the list of allowed publisher roles for security reasons")
+	}
 
 	pendingResponse := Call[*Subscription](
 		session,
-		&CallFeatures{URI: "wamp.router.subscribe"},
+		&CallFeatures{URI: "wamp.router.subscribe", IncludeRoles: []string{"router"}},
 		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
 
 	_, subscription, e := pendingResponse.Await()
 	if e == nil {
-		endpoint := NewPublishEventEndpoint[I](procedure, session.logger)
+		endpoint := NewPublishEventEndpoint[I](procedure, __logger)
 		session.Subscriptions[subscription.ID] = endpoint
-		session.logger.Debug("new subscription", logData)
+		__logger.Debug("new subscription")
 
 		onRejoin := func() {
 			delete(session.Subscriptions, subscription.ID)
@@ -284,7 +298,7 @@ func Subscribe[I any](
 		return subscription, nil
 	}
 
-	session.logger.Error("during subscribe", "error", e, logData)
+	__logger.Error("during subscribe", "error", e)
 	return nil, e
 }
 
@@ -294,20 +308,29 @@ func Register[I, O any](
 	options *RegisterOptions,
 	procedure ProcedureToCall[I, O],
 ) (*Registration, error) {
-	logData := slog.Group("registration", "URI", uri)
-	session.logger.Debug("trying to register", logData)
+	__logger := session.logger.With(
+		slog.Group(
+			"registration",
+			"URI", uri,
+		),
+	)
+	__logger.Debug("trying to register")
+
+	if len(options.IncludeRoles) == 0 {
+		__logger.Warn("fill in the list of allowed caller roles for security reasons")
+	}
 
 	pendingResponse := Call[*Registration](
 		session,
-		&CallFeatures{URI: "wamp.router.register"},
+		&CallFeatures{URI: "wamp.router.register", IncludeRoles: []string{"router"}},
 		NewResourcePayload[RegisterOptions]{uri, options},
 	)
 
 	_, registration, e := pendingResponse.Await()
 	if e == nil {
-		endpoint := NewCallEventEndpoint[I, O](procedure, session.logger)
+		endpoint := NewCallEventEndpoint[I, O](procedure, __logger)
 		session.Registrations[registration.ID] = endpoint
-		session.logger.Debug("new registration", logData)
+		__logger.Debug("new registration")
 
 		onRejoin := func() {
 			delete(session.Registrations, registration.ID)
@@ -318,7 +341,7 @@ func Register[I, O any](
 		return registration, nil
 	}
 
-	session.logger.Error("during register", "error", e, logData)
+	__logger.Error("during register", "error", e)
 	return nil, e
 }
 
@@ -367,209 +390,8 @@ func Unregister(
 func Leave(
 	session *Session,
 	reason string,
-) error {
+) {
 	logData := slog.Group("leave", "reason", reason)
 	session.logger.Debug("trying to leave", logData)
-	e := session.router.Close()
-	if e == nil {
-		session.logger.Debug("session successfully left", logData)
-	} else {
-		session.logger.Error("during leave", "error", e, logData)
-	}
-	return e
-}
-
-type NewGeneratorPayload struct {
-	ID string `json:"id"`
-}
-
-type remoteGenerator[T any] struct {
-	done        bool
-	ID          string
-	lastYieldID string
-	peer        *Peer
-	logger      *slog.Logger
-}
-
-func (generator *remoteGenerator[T]) Active() bool {
-	return !generator.done
-}
-
-func NewRemoteGenerator[T any](
-	session *Session,
-	initialEvent YieldEvent,
-) *remoteGenerator[T] {
-	payload, _ := ReadPayload[NewGeneratorPayload](initialEvent)
-	logData := slog.Group(
-		"generator",
-		"ID", payload.ID,
-	)
-	return &remoteGenerator[T]{
-		false,
-		payload.ID,
-		initialEvent.ID(),
-		session.router,
-		session.logger.With("name", "RemoteGenerator", logData),
-	}
-}
-
-func CallGenerator[O, I any](
-	session *Session,
-	features *CallFeatures,
-	inPayload I,
-) (*remoteGenerator[O], error) {
-	logData := slog.Group(
-		"generator",
-		"URI", features.URI,
-	)
-	session.logger.Debug("trying to initialize remote generator", logData)
-
-	pendingResponse := Call[any](session, features, inPayload)
-	yieldEvent, _, e := pendingResponse.Await()
-	if e == nil {
-		session.logger.Debug("remote generator successfully initialized", logData)
-		generator := NewRemoteGenerator[O](session, yieldEvent)
-		return generator, nil
-	}
-
-	session.logger.Error("during initialize remote generator", "error", e, logData)
-	return nil, e
-}
-
-func (generator *remoteGenerator[T]) Next(
-	timeout uint64,
-) (response ReplyEvent, outPayload T, e error) {
-	if generator.done {
-		generator.logger.Error("generator already closed")
-		return nil, outPayload, ErrorGeneratorExit
-	}
-
-	logData := slog.Group(
-		"nextEvent",
-		"yieldID", generator.lastYieldID,
-		"timeout", timeout,
-	)
-	generator.logger.Debug("trying to get next", logData)
-
-	nextFeatures := NextFeatures{generator.ID, generator.lastYieldID, timeout}
-	nextEvent := newNextEvent(&nextFeatures)
-	responseTimeout := time.Duration(2*timeout) * time.Second
-	responsePromise, cancelResponsePromise := generator.peer.PendingReplyEvents.New(
-		nextEvent.ID(),
-		responseTimeout,
-	)
-	pendingResponse := newPendingResponse[T](responsePromise, cancelResponsePromise)
-	ok := generator.peer.Send(nextEvent, DEFAULT_RESEND_COUNT)
-	if !ok {
-		generator.logger.Error("next event dispatch error", logData)
-		cancelResponsePromise()
-		generator.done = true
-		return nil, outPayload, ErrorDispatch
-	}
-
-	response, outPayload, e = pendingResponse.Await()
-	if e == nil && response.Kind() == MK_YIELD {
-		generator.logger.Debug("yield event successfully received", logData)
-		generator.lastYieldID = response.ID()
-	} else {
-		generator.logger.Debug("destroying generator", "error", e, logData)
-		generator.done = true
-	}
-
-	return response, outPayload, e
-}
-
-func (generator *remoteGenerator[T]) Stop() error {
-	if generator.done {
-		generator.logger.Error("generator already closed")
-		return ErrorGeneratorExit
-	}
-
-	generator.logger.Debug("trying to stop generator")
-
-	stopEvent := NewStopEvent(generator.ID)
-	ok := generator.peer.Send(stopEvent, DEFAULT_RESEND_COUNT)
-	if ok {
-		generator.done = true
-		generator.logger.Debug("generator successfully stopped")
-		return nil
-	}
-
-	generator.logger.Error("generator stop event dispatch error")
-	return ErrorDispatch
-}
-
-func yieldNext(
-	router *Peer,
-	generatorID string,
-	lifetime time.Duration,
-	yieldEvent YieldEvent,
-	__logger *slog.Logger,
-) NextEvent {
-	logger := __logger.With(
-		slog.Group(
-			"yieldEvent",
-			"ID", yieldEvent.ID(),
-			"GeneratorID", generatorID,
-			"GeneratorLifetime", lifetime,
-		),
-	)
-
-	nextEventPromise, cancelNextEventPromise := router.PendingNextEvents.New(yieldEvent.ID(), 0)
-
-	stopEventPromise, cancelStopEventPromise := router.PendingCancelEvents.New(generatorID, lifetime)
-
-	logger.Debug("trying to send yield event")
-	ok := router.Send(yieldEvent, DEFAULT_RESEND_COUNT)
-	if !ok {
-		logger.Error("yield event dispatch error (destroying generator)")
-		cancelNextEventPromise()
-		cancelStopEventPromise()
-		panic("protocol error")
-	}
-
-	select {
-	case _, done := <-stopEventPromise:
-		if done {
-			logger.Warn("generator stop event received (destroying generator)")
-		} else {
-			logger.Warn("generator lifetime expired (destroying generator)")
-		}
-		cancelNextEventPromise()
-		panic("generator destroy")
-	case nextEvent := <-nextEventPromise:
-		cancelStopEventPromise()
-		logger.Debug("generator next", "nextEvent.ID", nextEvent.ID())
-		return nextEvent
-	}
-}
-
-func Yield[I any](
-	source Event,
-	inPayload I,
-) NextEvent {
-	router := source.getRouter()
-	logger := router.logger.With(
-		"name", "Yield",
-		"sourceEvent.Kind", source.Kind(),
-	)
-
-	lifetime := DEFAULT_GENERATOR_LIFETIME * time.Second
-
-	callEvent, ok := source.(CallEvent)
-	if ok {
-		generator := NewGeneratorPayload{wampShared.NewID()}
-		yieldEvent := newYieldEvent(callEvent, generator)
-		source = yieldNext(router, generator.ID, lifetime, yieldEvent, logger)
-	}
-
-	nextEvent, ok := source.(NextEvent)
-	if ok {
-		nextFeatures := nextEvent.Features()
-		yieldEvent := newYieldEvent(nextEvent, inPayload)
-		return yieldNext(router, nextFeatures.GeneratorID, lifetime, yieldEvent, logger)
-	}
-
-	logger.Error("invalid source event (destroying generator)")
-	panic("invalid source event")
+	session.peer.Close()
 }
