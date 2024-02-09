@@ -46,9 +46,9 @@ type Peer struct {
 	pendingAcceptEvents   *wampShared.PendingMap[AcceptEvent]
 	PendingReplyEvents    *wampShared.PendingMap[ReplyEvent]
 	PendingCancelEvents   *wampShared.PendingMap[CancelEvent]
-	PendingNextEvents     *wampShared.PendingMap[NextEvent]
 	IncomingPublishEvents *wampShared.Observable[PublishEvent]
 	IncomingCallEvents    *wampShared.Observable[CallEvent]
+	IncomingSubEvents     *wampShared.Observable[SubEvent]
 	logger                *slog.Logger
 }
 
@@ -64,9 +64,9 @@ func newPeer(
 		wampShared.NewPendingMap[AcceptEvent](),
 		wampShared.NewPendingMap[ReplyEvent](),
 		wampShared.NewPendingMap[CancelEvent](),
-		wampShared.NewPendingMap[NextEvent](),
 		wampShared.NewObservable[PublishEvent](),
 		wampShared.NewObservable[CallEvent](),
+		wampShared.NewObservable[SubEvent](),
 		logger.With(
 			slog.Group(
 				"peer",
@@ -155,7 +155,7 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 	for {
 		event, e := peer.transport.Read()
 		if e == nil {
-			event.setPeer(peer)
+
 		} else if errors.Is(e, ErrorConnectionClosed) {
 			peer.logger.Warn("connection lost")
 			break
@@ -193,10 +193,9 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 		case CallEvent:
 			go peer.IncomingCallEvents.Next(event)
 			peer.acknowledge(event)
-		case NextEvent:
-			features := event.Features()
+		case SubEvent:
+			go peer.IncomingSubEvents.Next(event)
 			peer.acknowledge(event)
-			e = peer.PendingNextEvents.Complete(features.YieldID, event)
 		case CancelEvent:
 			features := event.Features()
 			peer.acknowledge(event)

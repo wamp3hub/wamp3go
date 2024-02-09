@@ -31,7 +31,7 @@ func testAcceptEventSerializer(t *testing.T, serializer wamp.Serializer) {
 
 func testPublishEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	expectedFeatures := wamp.PublishFeatures{
-		URI: "wamp.test",
+		URI:                "wamp.test",
 		IncludeSubscribers: []string{},
 		ExcludeSubscribers: []string{wampShared.NewID()},
 	}
@@ -167,27 +167,6 @@ func testCancelEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	}
 }
 
-func testNextEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	expectedFeatures := wamp.NextFeatures{YieldID: wampShared.NewID()}
-	event := wamp.MakeNextEvent(wampShared.NewID(), &expectedFeatures)
-	raw, e := serializer.Encode(event)
-	if e != nil {
-		t.Fatal(e)
-	}
-	__event, e := serializer.Decode(raw)
-	if e != nil {
-		t.Fatal(e)
-	}
-	event, ok := __event.(wamp.NextEvent)
-	if !ok {
-		t.Fatal("InvalidBehaviour")
-	}
-	features := event.Features()
-	if features.YieldID != expectedFeatures.YieldID {
-		t.Fatal("InvalidFeatures")
-	}
-}
-
 func testYieldEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	testReplyEventSerializer(t, serializer)
 }
@@ -202,6 +181,5 @@ func TestHappyPathJSONSerializer(t *testing.T) {
 	testAcceptEventSerializer(t, serializer)
 	testReplyEventSerializer(t, serializer)
 	testCancelEventSerializer(t, serializer)
-	testNextEventSerializer(t, serializer)
 	testYieldEventSerializer(t, serializer)
 }

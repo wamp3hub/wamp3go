@@ -28,15 +28,15 @@ func (JSONSerializer) Code() string {
 func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 	switch event := event.(type) {
 	case wamp.AcceptEvent:
-		type jsonAcceptMessage struct {
+		type jsonMessage struct {
 			ID       string               `json:"ID"`
 			Kind     wamp.MessageKind     `json:"kind"`
 			Features *wamp.AcceptFeatures `json:"features"`
 		}
-		message := jsonAcceptMessage{event.ID(), event.Kind(), event.Features()}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features()}
 		return json.Marshal(message)
 	case wamp.ReplyEvent:
-		type jsonReplyMessage struct {
+		type jsonMessage struct {
 			ID       string              `json:"ID"`
 			Kind     wamp.MessageKind    `json:"kind"`
 			Features *wamp.ReplyFeatures `json:"features"`
@@ -47,10 +47,10 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		if ok {
 			payload = field.Value
 		}
-		message := jsonReplyMessage{event.ID(), event.Kind(), event.Features(), payload}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features(), payload}
 		return json.Marshal(message)
 	case wamp.PublishEvent:
-		type jsonPublishMessage struct {
+		type jsonMessage struct {
 			ID       string                `json:"ID"`
 			Kind     wamp.MessageKind      `json:"kind"`
 			Features *wamp.PublishFeatures `json:"features"`
@@ -62,10 +62,10 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		if ok {
 			payload = field.Value
 		}
-		message := jsonPublishMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
 		return json.Marshal(message)
 	case wamp.CallEvent:
-		type jsonCallMessage struct {
+		type jsonMessage struct {
 			ID       string             `json:"ID"`
 			Kind     wamp.MessageKind   `json:"kind"`
 			Features *wamp.CallFeatures `json:"features"`
@@ -77,23 +77,24 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		if ok {
 			payload = field.Value
 		}
-		message := jsonCallMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features(), payload, event.Route()}
 		return json.Marshal(message)
-	case wamp.NextEvent:
-		type jsonNextMessage struct {
-			ID       string             `json:"ID"`
-			Kind     wamp.MessageKind   `json:"kind"`
-			Features *wamp.NextFeatures `json:"features"`
+	case wamp.SubEvent:
+		type jsonMessage struct {
+			ID       string           `json:"ID"`
+			Kind     wamp.MessageKind `json:"kind"`
+			Features string           `json:"features"`
+			Payload  any              `json:"payload"`
 		}
-		message := jsonNextMessage{event.ID(), event.Kind(), event.Features()}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features(), event.Payload()}
 		return json.Marshal(message)
 	case wamp.CancelEvent:
-		type jsonCancelMessage struct {
+		type jsonMessage struct {
 			ID       string              `json:"ID"`
 			Kind     wamp.MessageKind    `json:"kind"`
 			Features *wamp.ReplyFeatures `json:"features"`
 		}
-		message := jsonCancelMessage{event.ID(), event.Kind(), event.Features()}
+		message := jsonMessage{event.ID(), event.Kind(), event.Features()}
 		return json.Marshal(message)
 	}
 
@@ -117,16 +118,16 @@ func (serializer JSONSerializer) Decode(v []byte) (wamp.Event, error) {
 
 	switch messageKind {
 	case wamp.MK_ACCEPT:
-		type jsonAcceptMessage struct {
+		type jsonMessage struct {
 			ID       string               `json:"ID"`
 			Kind     wamp.MessageKind     `json:"kind"`
 			Features *wamp.AcceptFeatures `json:"features"`
 		}
-		message := new(jsonAcceptMessage)
+		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
 		event := wamp.MakeAcceptEvent(message.ID, message.Features)
 		return event, e
-	case wamp.MK_REPLY, wamp.MK_ERROR, wamp.MK_YIELD:
+	case wamp.MK_REPLY, wamp.MK_ERROR:
 		type jsonReplyMessage struct {
 			ID       string              `json:"ID"`
 			Kind     wamp.MessageKind    `json:"kind"`
@@ -138,14 +139,14 @@ func (serializer JSONSerializer) Decode(v []byte) (wamp.Event, error) {
 		event := wamp.MakeReplyEvent(message.ID, message.Kind, message.Features, &JSONPayloadField{message.Payload})
 		return event, e
 	case wamp.MK_PUBLISH:
-		type jsonPublishMessage struct {
+		type jsonMessage struct {
 			ID       string                `json:"ID"`
 			Kind     wamp.MessageKind      `json:"kind"`
 			Features *wamp.PublishFeatures `json:"features"`
 			Payload  json.RawMessage       `json:"payload"`
 			Route    *wamp.PublishRoute    `json:"route"`
 		}
-		message := new(jsonPublishMessage)
+		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
 		if message.Route == nil {
 			message.Route = new(wamp.PublishRoute)
@@ -153,37 +154,38 @@ func (serializer JSONSerializer) Decode(v []byte) (wamp.Event, error) {
 		event := wamp.MakePublishEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		return event, e
 	case wamp.MK_CALL:
-		type jsonCallMessage struct {
+		type jsonMessage struct {
 			ID       string             `json:"ID"`
 			Kind     wamp.MessageKind   `json:"kind"`
 			Features *wamp.CallFeatures `json:"features"`
 			Payload  json.RawMessage    `json:"payload"`
 			Route    *wamp.CallRoute    `json:"route"`
 		}
-		message := new(jsonCallMessage)
+		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
 		if message.Route == nil {
 			message.Route = new(wamp.CallRoute)
 		}
 		event := wamp.MakeCallEvent(message.ID, message.Features, &JSONPayloadField{message.Payload}, message.Route)
 		return event, e
-	case wamp.MK_NEXT:
-		type jsonNextMessage struct {
-			ID       string             `json:"ID"`
-			Kind     wamp.MessageKind   `json:"kind"`
-			Features *wamp.NextFeatures `json:"features"`
+	case wamp.MK_SUBEVENT:
+		type jsonMessage struct {
+			ID       string           `json:"ID"`
+			Kind     wamp.MessageKind `json:"kind"`
+			Features string           `json:"features"`
+			Payload  json.RawMessage  `json:"payload"`
 		}
-		message := new(jsonNextMessage)
+		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
-		event := wamp.MakeNextEvent(message.ID, message.Features)
+		event := wamp.MakeSubEvent(message.ID, message.Features, &JSONPayloadField{message.Payload})
 		return event, e
 	case wamp.MK_CANCEL:
-		type jsonCancelMessage struct {
+		type jsonMessage struct {
 			ID       string              `json:"ID"`
 			Kind     wamp.MessageKind    `json:"kind"`
 			Features *wamp.ReplyFeatures `json:"features"`
 		}
-		message := new(jsonCancelMessage)
+		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
 		event := wamp.MakeCancelEvent(message.ID, message.Features)
 		return event, e
