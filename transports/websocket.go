@@ -37,10 +37,22 @@ func (transport *WSTransport) Read() (wamp.Event, error) {
 	if e == nil {
 		return transport.Serializer.Decode(rawMessage)
 	}
-	if websocket.IsCloseError(e, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure) {
+	if websocket.IsCloseError(e, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 		return nil, wamp.ErrorConnectionClosed
 	}
 	return nil, ErrorBadConnection
+}
+
+func dialWebsocket(
+	address string,
+	serializer wamp.Serializer,
+) (wamp.Transport, error) {
+	connection, _, e := websocket.DefaultDialer.Dial(address, nil)
+	if e == nil {
+		instance := WSTransport{address, serializer, connection}
+		return &instance, nil
+	}
+	return nil, e
 }
 
 func WebsocketConnect(
@@ -49,18 +61,11 @@ func WebsocketConnect(
 	strategy wampShared.RetryStrategy,
 	logger *slog.Logger,
 ) (wamp.Transport, error) {
-	connect := func() (wamp.Transport, error) {
-		connection, _, e := websocket.DefaultDialer.Dial(address, nil)
-		if e == nil {
-			instance := WSTransport{address, serializer, connection}
-			return &instance, nil
-		}
-		return nil, e
-	}
-
 	instance, e := MakeReconnectable(
+		func() (wamp.Transport, error) {
+			return dialWebsocket(address, serializer)
+		},
 		strategy,
-		connect,
 		logger,
 	)
 	return instance, e

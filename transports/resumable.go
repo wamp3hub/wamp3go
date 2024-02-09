@@ -6,6 +6,7 @@ import (
 	wamp "github.com/wamp3hub/wamp3go"
 )
 
+// Wraps transport with pause and resume functionality
 type ResumableTransport struct {
 	open      bool
 	reading   sync.Locker

@@ -23,16 +23,16 @@ type Session struct {
 	Subscriptions map[string]publishEventEndpoint
 	Registrations map[string]callEventEndpoint
 	restores      map[string]func()
-	router        *Peer
+	peer          *Peer
 	logger        *slog.Logger
 }
 
 func (session *Session) ID() string {
-	return session.router.Details.ID
+	return session.peer.Details.ID
 }
 
 func (session *Session) Role() string {
-	return session.router.Details.Role
+	return session.peer.Details.Role
 }
 
 func NewSession(
@@ -52,7 +52,7 @@ func NewSession(
 		),
 	}
 
-	session.router.IncomingPublishEvents.Observe(
+	session.peer.IncomingPublishEvents.Observe(
 		func(publishEvent PublishEvent) {
 			features := publishEvent.Features()
 			route := publishEvent.Route()
@@ -79,7 +79,7 @@ func NewSession(
 		},
 	)
 
-	session.router.IncomingCallEvents.Observe(
+	session.peer.IncomingCallEvents.Observe(
 		func(callEvent CallEvent) {
 			features := callEvent.Features()
 			route := callEvent.Route()
@@ -99,7 +99,7 @@ func NewSession(
 
 				replyEventLogData := slog.Group("replyEvent", "ID", replyEvent.ID())
 
-				ok := session.router.Send(replyEvent, DEFAULT_RESEND_COUNT)
+				ok := session.peer.Send(replyEvent, DEFAULT_RESEND_COUNT)
 				if ok {
 					session.logger.Debug("call event processed successfully", callEventLogData, replyEventLogData)
 				} else {
@@ -115,7 +115,7 @@ func NewSession(
 		},
 	)
 
-	session.router.RejoinEvents.Observe(
+	session.peer.RejoinEvents.Observe(
 		func(__ struct{}) {
 			for name, restore := range session.restores {
 				session.logger.Debug("restoring", "name", name)
@@ -150,7 +150,7 @@ func Publish[I any](
 	}
 
 	__logger.Debug("trying to send call event")
-	ok := session.router.Send(publishEvent, DEFAULT_RESEND_COUNT)
+	ok := session.peer.Send(publishEvent, DEFAULT_RESEND_COUNT)
 	if ok {
 		__logger.Debug("publication successfully sent")
 		return nil
@@ -223,14 +223,14 @@ func Call[O, I any](
 	}
 
 	replyTimeout := time.Duration(features.Timeout)*time.Second + time.Second
-	replyEventPromise, cancelReplyEventPromise := session.router.PendingReplyEvents.New(
+	replyEventPromise, cancelReplyEventPromise := session.peer.PendingReplyEvents.New(
 		callEvent.ID(), replyTimeout,
 	)
 
 	cancelCallEvent := func() {
 		__logger.Debug("trying to cancel invocation")
 		cancelEvent := newCancelEvent(callEvent)
-		ok := session.router.Send(cancelEvent, DEFAULT_RESEND_COUNT)
+		ok := session.peer.Send(cancelEvent, DEFAULT_RESEND_COUNT)
 		if ok {
 			__logger.Debug("invocation successfully cancelled")
 		} else {
@@ -242,13 +242,13 @@ func Call[O, I any](
 	pendingResponse := newPendingResponse[O](replyEventPromise, cancelCallEvent)
 
 	__logger.Debug("trying to send call event")
-	ok := session.router.Send(callEvent, DEFAULT_RESEND_COUNT)
+	ok := session.peer.Send(callEvent, DEFAULT_RESEND_COUNT)
 	if ok {
 		__logger.Debug("call event successfully sent")
 	} else {
 		__logger.Error("call event dispatch error")
 		errorEvent := NewErrorEvent(callEvent, ErrorDispatch)
-		session.router.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
+		session.peer.PendingReplyEvents.Complete(callEvent.ID(), errorEvent)
 	}
 
 	return pendingResponse
@@ -279,7 +279,7 @@ func Subscribe[I any](
 
 	pendingResponse := Call[*Subscription](
 		session,
-		&CallFeatures{URI: "wamp.router.subscribe"},
+		&CallFeatures{URI: "wamp.router.subscribe", IncludeRoles: []string{"router"}},
 		NewResourcePayload[SubscribeOptions]{uri, options},
 	)
 
@@ -322,7 +322,7 @@ func Register[I, O any](
 
 	pendingResponse := Call[*Registration](
 		session,
-		&CallFeatures{URI: "wamp.router.register"},
+		&CallFeatures{URI: "wamp.router.register", IncludeRoles: []string{"router"}},
 		NewResourcePayload[RegisterOptions]{uri, options},
 	)
 
@@ -390,14 +390,8 @@ func Unregister(
 func Leave(
 	session *Session,
 	reason string,
-) error {
+) {
 	logData := slog.Group("leave", "reason", reason)
 	session.logger.Debug("trying to leave", logData)
-	e := session.router.Close()
-	if e == nil {
-		session.logger.Debug("session successfully left", logData)
-	} else {
-		session.logger.Error("during leave", "error", e, logData)
-	}
-	return e
+	session.peer.Close()
 }

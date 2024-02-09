@@ -50,7 +50,7 @@ func main() {
 		session,
 		"wamp.authenticate",
 		&wamp.RegisterOptions{
-			IncludeRoles: []string{"root"},
+			IncludeRoles: []string{"router"},
 		},
 		func(resume wampInterview.Resume[*LoginPayload], callEvent wamp.CallEvent) (*wampInterview.Offer, error) {
 			if resume.Role == "guest" {

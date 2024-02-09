@@ -24,7 +24,6 @@ func cast[T any](v any) (T, error) {
 }
 
 type readableEventPayload interface {
-	ID() string
 	Kind() MessageKind
 	Payload() any
 }

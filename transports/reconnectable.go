@@ -20,14 +20,14 @@ type reconnectableTransport struct {
 }
 
 func MakeReconnectable(
+	connectFactory func() (wamp.Transport, error),
 	strategy wampShared.RetryStrategy,
-	connect func() (wamp.Transport, error),
 	logger *slog.Logger,
 ) (*reconnectableTransport, error) {
 	instance := reconnectableTransport{
 		MakeResumable(nil),
 		strategy,
-		connect,
+		connectFactory,
 		logger.With(
 			"name", "reconnectable",
 		),
@@ -48,8 +48,6 @@ func (reconnectable *reconnectableTransport) Close() error {
 func (reconnectable *reconnectableTransport) hotSwap(
 	newTransport wamp.Transport,
 ) {
-	reconnectable.resumable.Pause()
-
 	if reconnectable.resumable.transport != nil {
 		// close previous transport
 		e := reconnectable.Close()
@@ -60,8 +58,6 @@ func (reconnectable *reconnectableTransport) hotSwap(
 		}
 	}
 	reconnectable.resumable.transport = newTransport
-
-	reconnectable.resumable.Resume()
 }
 
 func (reconnectable *reconnectableTransport) reconnect() error {
@@ -92,6 +88,8 @@ func (reconnectable *reconnectableTransport) reconnect() error {
 	reconnectable.strategy.Reset()
 
 	reconnectable.hotSwap(newTransport)
+
+	reconnectable.resumable.Resume()
 
 	return wamp.ErrorConnectionRestored
 }

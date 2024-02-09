@@ -40,11 +40,11 @@ func (event *eventProto[F]) Features() F {
 	return event.features
 }
 
-func (event *eventProto[F]) setRouter(instance *Peer) {
+func (event *eventProto[F]) setPeer(instance *Peer) {
 	event.peer = instance
 }
 
-func (event *eventProto[F]) getRouter() *Peer {
+func (event *eventProto[F]) getPeer() *Peer {
 	return event.peer
 }
 
@@ -71,8 +71,8 @@ func (field *routeEventField[T]) Route() T {
 type Event interface {
 	ID() string
 	Kind() MessageKind
-	setRouter(*Peer)
-	getRouter() *Peer
+	setPeer(*Peer)
+	getPeer() *Peer
 }
 
 type AcceptFeatures struct {

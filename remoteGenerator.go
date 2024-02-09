@@ -53,7 +53,7 @@ func NewRemoteGenerator[T any](
 		false,
 		payload.ID,
 		initialEvent.ID(),
-		session.router,
+		session.peer,
 		session.logger.With("name", "RemoteGenerator", logData),
 	}
 }
@@ -145,7 +145,7 @@ func (generator *remoteGenerator[T]) Stop() error {
 }
 
 func yieldNext(
-	router *Peer,
+	peer *Peer,
 	generatorID string,
 	lifetime time.Duration,
 	yieldEvent YieldEvent,
@@ -160,12 +160,12 @@ func yieldNext(
 		),
 	)
 
-	nextEventPromise, cancelNextEventPromise := router.PendingNextEvents.New(yieldEvent.ID(), 0)
+	nextEventPromise, cancelNextEventPromise := peer.PendingNextEvents.New(yieldEvent.ID(), 0)
 
-	stopEventPromise, cancelStopEventPromise := router.PendingCancelEvents.New(generatorID, lifetime)
+	stopEventPromise, cancelStopEventPromise := peer.PendingCancelEvents.New(generatorID, lifetime)
 
 	logger.Debug("trying to send yield event")
-	ok := router.Send(yieldEvent, DEFAULT_RESEND_COUNT)
+	ok := peer.Send(yieldEvent, DEFAULT_RESEND_COUNT)
 	if !ok {
 		logger.Error("yield event dispatch error (destroying generator)")
 		cancelNextEventPromise()
@@ -193,7 +193,7 @@ func Yield[I any](
 	source Event,
 	inPayload I,
 ) NextEvent {
-	router := source.getRouter()
+	router := source.getPeer()
 	__logger := router.logger.With(
 		"name", "Yield",
 		"sourceEvent.Kind", source.Kind(),

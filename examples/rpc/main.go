@@ -59,9 +59,9 @@ func main() {
 		},
 		"WAMP",
 	)
-	_, v, e := pendingResponse.Await()
+	_, result, e := pendingResponse.Await()
 	if e == nil {
-		logger.Info("call(example.greeting)", "result", v)
+		logger.Info("call(example.greeting)", "result", result)
 	} else {
 		logger.Error("call(example.greeting)", "error", e)
 	}
