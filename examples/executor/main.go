@@ -3,6 +3,9 @@ package main
 import (
 	"errors"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	wamp "github.com/wamp3hub/wamp3go"
 	wampTransports "github.com/wamp3hub/wamp3go/transports"
@@ -51,20 +54,9 @@ func main() {
 		panic("register error")
 	}
 
-	pendingResponse := wamp.Call[string](
-		session,
-		&wamp.CallFeatures{
-			URI: "net.example.greeting",
-			IncludeRoles: []string{"customer"},
-		},
-		"WAMP",
-	)
-	_, result, e := pendingResponse.Await()
-	if e == nil {
-		logger.Info("call(example.greeting)", "result", result)
-	} else {
-		logger.Error("call(example.greeting)", "error", e)
-	}
+	exitSignal := make(chan os.Signal, 1)
+	signal.Notify(exitSignal, syscall.SIGINT, syscall.SIGTERM)
+	<-exitSignal
 
 	wamp.Leave(session, "done")
 }
