@@ -199,27 +199,6 @@ type ReplyFeatures struct {
 	VisitedRouters []string `json:"visitedRouters"`
 }
 
-type CancelEvent interface {
-	Event
-	Features() *ReplyFeatures
-}
-
-func MakeCancelEvent(
-	id string,
-	features *ReplyFeatures,
-) CancelEvent {
-	type message struct {
-		*eventProto[*ReplyFeatures]
-	}
-	return &message{
-		&eventProto[*ReplyFeatures]{id, MK_CANCEL, features},
-	}
-}
-
-func newCancelEvent(source Event) CancelEvent {
-	return MakeCancelEvent(wampShared.NewID(), &ReplyFeatures{source.ID(), []string{}})
-}
-
 type ReplyEvent interface {
 	Event
 	Features() *ReplyFeatures
@@ -265,6 +244,10 @@ func NewErrorEvent(source Event, e error) ErrorEvent {
 		&ReplyFeatures{source.ID(), []string{}},
 		errorEventPayload{errorMessage},
 	)
+}
+
+func NewCancelEvent(source Event) ErrorEvent {
+	return NewErrorEvent(source, ErrorCancelled)
 }
 
 type SubEvent interface {

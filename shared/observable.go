@@ -14,9 +14,12 @@ type Observer[T any] struct {
 // TODO unconsume
 
 type Observable[T any] struct {
-	done      bool
 	observers []*Observer[T]
-	mutex     sync.RWMutex
+	mutex     sync.Mutex
+}
+
+func NewObservable[T any]() *Observable[T] {
+	return new(Observable[T])
 }
 
 func (object *Observable[T]) Observe(next nextFunction[T], complete completeFunction) *Observer[T] {
@@ -28,7 +31,6 @@ func (object *Observable[T]) Observe(next nextFunction[T], complete completeFunc
 }
 
 func (object *Observable[T]) Next(v T) {
-	// TODO rate limiting
 	for _, instance := range object.observers {
 		instance.next(v)
 	}
@@ -36,13 +38,23 @@ func (object *Observable[T]) Next(v T) {
 
 func (object *Observable[T]) Complete() {
 	object.mutex.Lock()
-	object.done = true
 	for _, instance := range object.observers {
 		instance.complete()
 	}
 	clear(object.observers)
 }
 
-func NewObservable[T any]() *Observable[T] {
-	return new(Observable[T])
+func (object *Observable[T]) Iterator(buffer int) <-chan T {
+	q := make(chan T, buffer)
+
+	object.Observe(
+		func(v T) {
+			q <- v
+		},
+		func() {
+			close(q)
+		},
+	)
+
+	return q
 }

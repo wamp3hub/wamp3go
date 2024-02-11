@@ -45,7 +45,6 @@ type Peer struct {
 	RejoinEvents          *wampShared.Observable[struct{}]
 	pendingAcceptEvents   *wampShared.PendingMap[AcceptEvent]
 	PendingReplyEvents    *wampShared.PendingMap[ReplyEvent]
-	PendingCancelEvents   *wampShared.PendingMap[CancelEvent]
 	IncomingPublishEvents *wampShared.Observable[PublishEvent]
 	IncomingCallEvents    *wampShared.Observable[CallEvent]
 	IncomingSubEvents     *wampShared.Observable[SubEvent]
@@ -63,7 +62,6 @@ func newPeer(
 		wampShared.NewObservable[struct{}](),
 		wampShared.NewPendingMap[AcceptEvent](),
 		wampShared.NewPendingMap[ReplyEvent](),
-		wampShared.NewPendingMap[CancelEvent](),
 		wampShared.NewObservable[PublishEvent](),
 		wampShared.NewObservable[CallEvent](),
 		wampShared.NewObservable[SubEvent](),
@@ -196,10 +194,6 @@ func (peer *Peer) readIncomingEvents(wg *sync.WaitGroup) {
 		case SubEvent:
 			go peer.IncomingSubEvents.Next(event)
 			peer.acknowledge(event)
-		case CancelEvent:
-			features := event.Features()
-			peer.acknowledge(event)
-			e = peer.PendingCancelEvents.Complete(features.InvocationID, event)
 		default:
 			e = errors.New("unexpected event type (ignoring)")
 		}

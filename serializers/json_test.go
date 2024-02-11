@@ -146,31 +146,6 @@ func testReplyEventSerializer(t *testing.T, serializer wamp.Serializer) {
 	}
 }
 
-func testCancelEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	expectedFeatures := wamp.ReplyFeatures{InvocationID: wampShared.NewID()}
-	event := wamp.MakeCancelEvent(wampShared.NewID(), &expectedFeatures)
-	raw, e := serializer.Encode(event)
-	if e != nil {
-		t.Fatal(e)
-	}
-	__event, e := serializer.Decode(raw)
-	if e != nil {
-		t.Fatal(e)
-	}
-	event, ok := __event.(wamp.CancelEvent)
-	if !ok {
-		t.Fatal("InvalidBehaviour")
-	}
-	features := event.Features()
-	if features.InvocationID != expectedFeatures.InvocationID {
-		t.Fatal("InvalidFeatures")
-	}
-}
-
-func testYieldEventSerializer(t *testing.T, serializer wamp.Serializer) {
-	testReplyEventSerializer(t, serializer)
-}
-
 func TestHappyPathJSONSerializer(t *testing.T) {
 	serializer := new(wampSerializer.JSONSerializer)
 	if serializer.Code() != "json" {
@@ -180,6 +155,4 @@ func TestHappyPathJSONSerializer(t *testing.T) {
 	testCallEventSerializer(t, serializer)
 	testAcceptEventSerializer(t, serializer)
 	testReplyEventSerializer(t, serializer)
-	testCancelEventSerializer(t, serializer)
-	testYieldEventSerializer(t, serializer)
 }

@@ -88,14 +88,6 @@ func (JSONSerializer) Encode(event wamp.Event) ([]byte, error) {
 		}
 		message := jsonMessage{event.ID(), event.Kind(), event.Features(), event.Payload()}
 		return json.Marshal(message)
-	case wamp.CancelEvent:
-		type jsonMessage struct {
-			ID       string              `json:"ID"`
-			Kind     wamp.MessageKind    `json:"kind"`
-			Features *wamp.ReplyFeatures `json:"features"`
-		}
-		message := jsonMessage{event.ID(), event.Kind(), event.Features()}
-		return json.Marshal(message)
 	}
 
 	return nil, errors.New("UnexpectedEventKind")
@@ -178,16 +170,6 @@ func (serializer JSONSerializer) Decode(v []byte) (wamp.Event, error) {
 		message := new(jsonMessage)
 		e := json.Unmarshal(v, message)
 		event := wamp.MakeSubEvent(message.ID, message.Features, &JSONPayloadField{message.Payload})
-		return event, e
-	case wamp.MK_CANCEL:
-		type jsonMessage struct {
-			ID       string              `json:"ID"`
-			Kind     wamp.MessageKind    `json:"kind"`
-			Features *wamp.ReplyFeatures `json:"features"`
-		}
-		message := new(jsonMessage)
-		e := json.Unmarshal(v, message)
-		event := wamp.MakeCancelEvent(message.ID, message.Features)
 		return event, e
 	}
 

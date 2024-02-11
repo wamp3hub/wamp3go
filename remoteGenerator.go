@@ -20,10 +20,6 @@ func GeneratorExit(source Event) *generatorExitException {
 	return &generatorExitException{source}
 }
 
-// type NewGeneratorPayload struct {
-// 	ID string `json:"id"`
-// }
-
 // type remoteGenerator[T any] struct {
 // 	done        bool
 // 	ID          string
@@ -185,12 +181,12 @@ func GeneratorExit(source Event) *generatorExitException {
 // 	}
 // }
 
-// func Yield[I any](
+// func Yield[I, O any](
+// 	session *Session,
 // 	source Event,
 // 	inPayload I,
-// ) NextEvent {
-// 	router := source.getPeer()
-// 	__logger := router.logger.With(
+// ) O {
+// 	__logger := session.logger.With(
 // 		"name", "Yield",
 // 		"sourceEvent.Kind", source.Kind(),
 // 	)

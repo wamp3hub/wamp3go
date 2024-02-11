@@ -229,7 +229,7 @@ func Call[O, I any](
 
 	cancelCallEvent := func() {
 		__logger.Debug("trying to cancel invocation")
-		cancelEvent := newCancelEvent(callEvent)
+		cancelEvent := NewCancelEvent(callEvent)
 		ok := session.peer.Send(cancelEvent, DEFAULT_RESEND_COUNT)
 		if ok {
 			__logger.Debug("invocation successfully cancelled")
